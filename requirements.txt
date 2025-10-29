@@ -1,0 +1,7 @@
+gtfs-realtime-bindings
+pandas
+matplotlib
+notebook
+jupyterlab
+requests
+ipykernel
