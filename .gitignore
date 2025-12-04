@@ -1,2 +1,5 @@
 *.code-workspace
 /data
+**/__pycache__
+**/config.yaml
+**/*.log
