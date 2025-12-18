@@ -25,5 +25,11 @@ services:
     depends_on:
       - mysql
 
+  data_ingestion:
+    build: .
+    container_name: data_ingestion
+    depends_on:
+      - mysql
+
 volumes:
   mysql_data:

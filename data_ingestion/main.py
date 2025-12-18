@@ -15,8 +15,8 @@ from utils import (
 )
 from queries import CREATE_TABLE_QUERY, INSERT_QUERY
 
-config_path = "config.yaml"
-with open(config_path, 'r') as file:
+CONFIG_PATH = "config.yaml"
+with open(CONFIG_PATH, 'r', encoding='utf-8') as file:
     config = yaml.safe_load(file)
 
 REALTIME_VEHICLE_UPDATES_URL = config["ingestion_url"]
