@@ -16,6 +16,8 @@ from utils import (
 from queries import CREATE_TABLE_QUERY, INSERT_QUERY
 
 CONFIG_PATH = "config.yaml"
+FETCH_DELAY_SECONDS = 5 
+
 with open(CONFIG_PATH, 'r', encoding='utf-8') as file:
     config = yaml.safe_load(file)
 
@@ -104,4 +106,4 @@ while True:
     except Exception as e:
         logging.error("Unexpected error: %e", e, exc_info=True)
     # Sleep between feed fetches (adjust to feed update interval)
-    time.sleep(5)
+    time.sleep(FETCH_DELAY_SECONDS)
