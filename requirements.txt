@@ -6,3 +6,5 @@ notebook
 jupyterlab
 requests
 ipykernel
+geopandas
+plotly
