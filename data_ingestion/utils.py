@@ -158,8 +158,8 @@ def format_data(df_feed: pd.DataFrame) -> pd.DataFrame:
         df_feed['trip_start_date'] + ' ' + df_feed['trip_start_time'], 
         format='%Y%m%d %H:%M:%S', errors='coerce'
     )
-    df_feed['feed_timestamp'] = pd.to_datetime(df_feed['feed_timestamp'], unit='ms')
-    df_feed['timestamp'] = pd.to_datetime(df_feed['timestamp'], unit='ms')
+    df_feed['feed_timestamp'] = pd.to_datetime(df_feed['feed_timestamp'], unit='s')
+    df_feed['timestamp'] = pd.to_datetime(df_feed['timestamp'], unit='s')
     return df_feed
 
 def format_data_for_db(df_feed: pd.DataFrame) -> pd.DataFrame:
