@@ -205,4 +205,7 @@ def format_data_for_db(df_feed: pd.DataFrame) -> pd.DataFrame:
     for col, col_type in col_types.items():
         if col in df_feed.columns:
             df_feed[col] = df_feed[col].astype(col_type)
+
+    #drop cols with No trip start timestamp
+    df_feed = df_feed[~df_feed['trip_start_timestamp'].isna()].reset_index(drop=True)
     return df_feed
