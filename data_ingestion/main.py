@@ -1,10 +1,12 @@
 """
 Main script for ingesting GTFS-Realtime vehicle updates into MySQL database.
 
-This script fetches GTFS-Realtime data from a specified URL at regular intervals, processes the data,
-and inserts it into a MySQL database table. It includes error handling and logging for monitoring the ingestion process.
+This script fetches GTFS-Realtime data from a specified URL at regular 
+intervals, processes the data, and inserts it into a MySQL database table. 
+It includes error handling and logging for monitoring the ingestion process.
 
-This script uses configuration parameters defined in a YAML file for database connection and data ingestion settings.
+This script uses configuration parameters defined in a YAML file for database 
+connection and data ingestion settings.
 """
 
 import argparse
@@ -12,7 +14,7 @@ import time
 import logging
 import yaml
 import mysql.connector
-from utils import (
+from .utils import (
     fetch_gtfs_data,
     parse_gtfs_data,
     extract_feed_info,
@@ -20,7 +22,7 @@ from utils import (
     format_data,
     format_data_for_db
 )
-from queries import CREATE_TABLE_QUERY, INSERT_QUERY
+from .queries import CREATE_TABLE_QUERY, INSERT_QUERY
 
 CONFIG_PATH = "config.yaml"
 
@@ -34,7 +36,7 @@ REQUIRED_CONNECTION_KEYS = [
     CP_HOST_KEY,
     CP_USER_KEY,
     CP_PASSWORD_KEY,
-    CP_DATABASE_KEY,  
+    CP_DATABASE_KEY,
     CP_PORT_KEY
 ]
 
@@ -77,9 +79,11 @@ class DataIngestion():
 
         self._check_parameters()
         self.fetch_delay_seconds = self.data_ingestion_params[DIP_FETCH_DELAY_SECONDS_KEY]
-        self.connection_retry_delay_seconds = self.data_ingestion_params[DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY]
+        self.connection_retry_delay_seconds = self.data_ingestion_params[
+            DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY
+        ]
 
-    
+
     def _check_parameters(self):
         """
             Check if all required parameters are present.
@@ -87,7 +91,7 @@ class DataIngestion():
         for key in REQUIRED_CONNECTION_KEYS:
             if key not in self.connection_params:
                 raise ValueError(f"Missing connection parameter: {key}")
-            
+
         for key in REQUIRED_INGESTION_KEYS:
             if key not in self.data_ingestion_params:
                 raise ValueError(f"Missing data ingestion parameter: {key}")
@@ -116,7 +120,7 @@ class DataIngestion():
             except mysql.connector.Error:
                 logging.exception("Failed to connect to MySQL")
                 time.sleep(self.connection_retry_delay_seconds)
-        
+
         return conn, cur
 
     def _create_table_if_not_exists(self, conn, cur):
@@ -179,8 +183,9 @@ class DataIngestion():
 
     def run_ingestion_loop(self):
         """
-        Starts the continuous data ingestion loop. Continually fetches data from the GTFS-Realtime feed,
-        processes it, and inserts it into the MySQL database.
+        Starts the continuous data ingestion loop. Continually fetches data 
+        from the GTFS-Realtime feed, processes it, and inserts it into the 
+        MySQL database.
         """
         conn, cur = self._get_sql_connection()
         self._create_table_if_not_exists(conn, cur)
