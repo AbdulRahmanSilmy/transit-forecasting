@@ -9,4 +9,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy scripts 
 COPY . .
-CMD ["python", "main.py"]
+CMD ["python", "-m", "data_ingestion"]
