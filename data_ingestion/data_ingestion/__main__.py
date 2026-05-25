@@ -39,12 +39,12 @@ def main(config_path: str = CONFIG_PATH):
     with open(config_path, 'r', encoding='utf-8') as file:
         config = yaml.safe_load(file)
 
+    connection_params = config.get(CONNECTION_PARAMS_KEY, {})
+
     vu_config = config.get("vehicle_updates")
-    vu_connection_params = dict(**vu_config[CONNECTION_PARAMS_KEY])
     vu_data_ingestion_params = dict(**vu_config[DATA_INGESTION_PARAMS_KEY])
 
     tu_config = config.get("trip_updates")
-    tu_connection_params = dict(**tu_config[CONNECTION_PARAMS_KEY])
     tu_data_ingestion_params = dict(**tu_config[DATA_INGESTION_PARAMS_KEY])
 
     logging_file = config[LOGGING_FILE_KEY]
@@ -62,11 +62,11 @@ def main(config_path: str = CONFIG_PATH):
 
     # Database connection
     vu_data_ingestion = VehicleUpdatesDataIngestion(
-        connection_params=vu_connection_params,
+        connection_params=connection_params,
         data_ingestion_params=vu_data_ingestion_params
     )
     tu_data_ingestion = TripUpdatesDataIngestion(
-        connection_params=tu_connection_params,
+        connection_params=connection_params,
         data_ingestion_params=tu_data_ingestion_params
     )
 

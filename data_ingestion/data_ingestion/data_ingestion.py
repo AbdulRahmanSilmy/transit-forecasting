@@ -105,7 +105,6 @@ class DataIngestion(ABC):
             DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY
         ]
 
-        self.table_db = self.connection_params[CP_DATABASE_KEY]
 
     @staticmethod
     @abstractmethod
@@ -114,7 +113,7 @@ class DataIngestion(ABC):
 
     @staticmethod
     @abstractmethod
-    def _check_duplicate_entity(entity, latest_update) -> bool:
+    def _check_duplicate_entity(entity, latest_update) -> Tuple[bool, Dict]:
         pass
 
     @staticmethod
@@ -159,15 +158,16 @@ class DataIngestion(ABC):
             A list of dictionary representations of the FeedEntities.
 
         latest_updates: dict
-            A dictionary mapping vehicle IDs to their latest timestamps.
-
+            A tracking structure to identify and filter out duplicate entities based on their 
+            unique identifiers.
         Returns
         -------
         df_feed: pd.DataFrame
             A DataFrame representation of the FeedEntities.
 
-        vehicle_current_timestamp: dict
-            A dictionary mapping vehicle IDs to their latest timestamps.
+        latest_updates: dict
+            An updated latest-updates tracking structure, in the same format as the input
+            ``latest_updates``.
         """
         list_non_duplicates = []
         for dict_entity in list_dict_entities:
@@ -379,7 +379,11 @@ class VehicleUpdatesDataIngestion(DataIngestion):
 
     @staticmethod
     def _check_duplicate_entity(entity, latest_update) -> Tuple[bool, Dict]:
-        vehicle_id = entity['vehicle_id']
+        vehicle_id = entity.get('vehicle_id')
+
+        if vehicle_id is None:
+            return False, latest_update
+        
         cond = vehicle_id not in latest_update
         cond |= (vehicle_id in latest_update and
                  entity['timestamp'] > latest_update[vehicle_id])
@@ -458,7 +462,7 @@ class TripUpdatesDataIngestion(DataIngestion):
     TABLE_NAME = TRIP_UPDATE_TABLE
 
     @staticmethod
-    def _get_dicts_from_feed(header, entity) -> dict:
+    def _get_dicts_from_feed(header, entity) -> List[Dict]:
         """
         Convert a FeedEntity to a dictionary, handling missing fields gracefully.
 
@@ -472,7 +476,7 @@ class TripUpdatesDataIngestion(DataIngestion):
 
         Returns
         -------
-        list
+        list[Dict]
             A list of dictionary representations of the FeedEntity.
         """
         trip_update = get_field(entity, "trip_update")
@@ -488,6 +492,8 @@ class TripUpdatesDataIngestion(DataIngestion):
             "trip_direction_id": get_field(trip, "direction_id"),
         }
         list_dicts = []
+        if not stop_time_update:
+            return list_dicts
         for stu in stop_time_update:
             dict_str = base_dict.copy()
             arrival = get_field(stu, "arrival")
@@ -515,9 +521,14 @@ class TripUpdatesDataIngestion(DataIngestion):
             'departure_delay', 'departure_time', 'departure_uncertainty'
         ]
 
-        trip_id = entity['trip_id']
-        stop_id = entity['stop_id']
+        trip_id = entity.get('trip_id')
+        stop_id = entity.get('stop_id')
         cond = False
+
+         # If we don't have valid identifiers, we cannot reliably deduplicate.
+        if trip_id is None or stop_id is None:
+            return cond, latest_update
+
         if trip_id not in latest_update:
             cond = True
             latest_update[trip_id] = {}
