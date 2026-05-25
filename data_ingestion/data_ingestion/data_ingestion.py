@@ -8,9 +8,6 @@ The following are currently populated tables and their respective classes:
 - Vehicle Updates -> VehicleUpdatesDataIngestion
 - Trip Updates -> TripUpdatesDataIngestion
 
-TODO
-----
-- Remove unused imports from utils
 """
 from abc import ABC, abstractmethod
 import time
@@ -22,10 +19,6 @@ import pandas as pd
 from .utils import (
     fetch_gtfs_data,
     parse_gtfs_data,
-    extract_feed_info,
-    get_df_feed,
-    format_data,
-    format_data_for_db,
     get_field
 )
 from .queries import (
