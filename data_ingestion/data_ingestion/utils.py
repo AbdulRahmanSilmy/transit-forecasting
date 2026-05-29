@@ -1,4 +1,11 @@
-"""Utility functions for GTFS real-time data ingestion and processing."""
+"""
+Utility functions for GTFS real-time data ingestion and processing.
+
+TODO:
+-------
+- Improve format data for db function
+- Replace print statements with logging
+"""
 
 import logging
 from typing import List
@@ -7,6 +14,30 @@ import pandas as pd
 import requests
 from google.transit import gtfs_realtime_pb2
 from requests.exceptions import Timeout
+
+from .constants import (
+    CONGESTION_LEVEL_KEY,
+    CURRENT_STATUS_KEY,
+    CURRENT_STOP_SEQUENCE_KEY,
+    ENTITY_ID_KEY,
+    FEED_TIMESTAMP_KEY,
+    POSITION_BEARING_KEY,
+    POSITION_LATITUDE_KEY,
+    POSITION_LONGITUDE_KEY,
+    POSITION_ODOMETER_KEY,
+    POSITION_SPEED_KEY,
+    SCHEDULE_RELATIONSHIP_KEY,
+    STOP_ID_KEY,
+    TIMESTAMP_KEY,
+    TRIP_DIRECTION_ID_KEY,
+    TRIP_ID_KEY,
+    TRIP_ROUTE_ID_KEY,
+    TRIP_SCHEDULE_RELATIONSHIP_KEY,
+    TRIP_START_DATE_KEY,
+    TRIP_START_TIME_KEY,
+    VEHICLE_ID_KEY,
+    VEHICLE_LABEL_KEY,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,26 +99,26 @@ def get_dict_from_feed(header, entity) -> dict:
     vehicle_info = get_field(vehicle, "vehicle")
 
     return {
-        "feed_timestamp": get_field(header, "timestamp"),
-        "entity_id": get_field(entity, "id"),
-        "trip_id": get_field(trip, "trip_id"),
-        "trip_start_time": get_field(trip, "start_time"),
-        "trip_start_date": get_field(trip, "start_date"),
-        "trip_schedule_relationship": get_field(trip, "schedule_relationship"),
-        "trip_route_id": get_field(trip, "route_id"),
-        "trip_direction_id": get_field(trip, "direction_id"),
-        "position_latitude": get_field(position, "latitude"),
-        "position_longitude": get_field(position, "longitude"),
-        "position_bearing": get_field(position, "bearing"),
-        "position_odometer": get_field(position, "odometer"),
-        "position_speed": get_field(position, "speed"),
-        "current_stop_sequence": get_field(vehicle, "current_stop_sequence"),
-        "current_status": get_field(vehicle, "current_status"),
-        "timestamp": get_field(vehicle, "timestamp"),
-        "congestion_level": get_field(vehicle, "congestion_level"),
-        "stop_id": get_field(vehicle, "stop_id"),
-        "vehicle_id": get_field(vehicle_info, "id"),
-        "vehicle_label": get_field(vehicle_info, "label"),
+        FEED_TIMESTAMP_KEY: get_field(header, TIMESTAMP_KEY),
+        ENTITY_ID_KEY: get_field(entity, "id"),
+        TRIP_ID_KEY: get_field(trip, TRIP_ID_KEY),
+        TRIP_START_TIME_KEY: get_field(trip, TRIP_START_TIME_KEY),
+        TRIP_START_DATE_KEY: get_field(trip, TRIP_START_DATE_KEY),
+        TRIP_SCHEDULE_RELATIONSHIP_KEY: get_field(trip, SCHEDULE_RELATIONSHIP_KEY),
+        TRIP_ROUTE_ID_KEY: get_field(trip, TRIP_ROUTE_ID_KEY),
+        TRIP_DIRECTION_ID_KEY: get_field(trip, TRIP_DIRECTION_ID_KEY),
+        POSITION_LATITUDE_KEY: get_field(position, POSITION_LATITUDE_KEY),
+        POSITION_LONGITUDE_KEY: get_field(position, POSITION_LONGITUDE_KEY),
+        POSITION_BEARING_KEY: get_field(position, POSITION_BEARING_KEY),
+        POSITION_ODOMETER_KEY: get_field(position, POSITION_ODOMETER_KEY),
+        POSITION_SPEED_KEY: get_field(position, POSITION_SPEED_KEY),
+        CURRENT_STOP_SEQUENCE_KEY: get_field(vehicle, CURRENT_STOP_SEQUENCE_KEY),
+        CURRENT_STATUS_KEY: get_field(vehicle, CURRENT_STATUS_KEY),
+        TIMESTAMP_KEY: get_field(vehicle, TIMESTAMP_KEY),
+        CONGESTION_LEVEL_KEY: get_field(vehicle, CONGESTION_LEVEL_KEY),
+        STOP_ID_KEY: get_field(vehicle, STOP_ID_KEY),
+        VEHICLE_ID_KEY: get_field(vehicle_info, VEHICLE_ID_KEY),
+        VEHICLE_LABEL_KEY: get_field(vehicle_info, VEHICLE_LABEL_KEY),
     }
 
 
@@ -218,6 +249,6 @@ def format_data_for_db(df_feed: pd.DataFrame) -> pd.DataFrame:
         if col in df_feed.columns:
             df_feed[col] = df_feed[col].astype(col_type)
 
-    # Drop rows with missing trip start timestamps before DB insertion.
+    # drop cols with No trip start timestamp
     df_feed = df_feed[~df_feed["trip_start_timestamp"].isna()].reset_index(drop=True)
     return df_feed

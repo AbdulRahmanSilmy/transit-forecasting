@@ -18,45 +18,11 @@ from typing import Dict, List, Tuple
 import mysql.connector
 import pandas as pd
 
-from .queries import (
-    TRIP_UPDATE_TABLE,
-    TRIP_UPDATES_CREATE_TABLE_QUERY,
-    TRIP_UPDATES_INSERT_QUERY,
-    VEHICLE_UPDATE_TABLE,
-    VEHICLE_UPDATES_CREATE_TABLE_QUERY,
-    VEHICLE_UPDATES_INSERT_QUERY,
-)
+from . import constants as cons
+from . import queries as sql_queries
 from .utils import fetch_gtfs_data, get_field, parse_gtfs_data
 
 logger = logging.getLogger(__name__)
-
-CONFIG_PATH = "config.yaml"
-
-CONNECTION_PARAMS_KEY = "connection_params"
-CP_HOST_KEY = "host"
-CP_USER_KEY = "user"
-CP_PASSWORD_KEY = "password"
-CP_DATABASE_KEY = "database"
-CP_PORT_KEY = "port"
-REQUIRED_CONNECTION_KEYS = [
-    CP_HOST_KEY,
-    CP_USER_KEY,
-    CP_PASSWORD_KEY,
-    CP_DATABASE_KEY,
-    CP_PORT_KEY,
-]
-
-DATA_INGESTION_PARAMS_KEY = "data_ingestion_params"
-DIP_INGESTION_URL_KEY = "ingestion_url"
-DIP_FETCH_DELAY_SECONDS_KEY = "fetch_delay_seconds"
-DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY = "connection_retry_delay_seconds"
-REQUIRED_INGESTION_KEYS = [
-    DIP_INGESTION_URL_KEY,
-    DIP_FETCH_DELAY_SECONDS_KEY,
-    DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY,
-]
-
-LOGGING_FILE_KEY = "logging_file"
 
 
 class DataIngestion(ABC):
@@ -99,24 +65,16 @@ class DataIngestion(ABC):
             raise TypeError(f"{cls.__name__} must define 'TABLE_NAME'")
 
     def __init__(self, connection_params: dict, data_ingestion_params: dict):
-        """Initialize the ingestion instance and its per-instance duplicate state.
-
-        Notes
-        -----
-        ``_latest_update`` is intentionally instance-local. If a single
-        ``DataIngestion`` instance is shared across threads in the future, the
-        duplicate-tracking state will need synchronization.
-        """
         self.connection_params = connection_params
         self.data_ingestion_params = data_ingestion_params
         self._latest_update = {}
 
         self._check_parameters()
         self.fetch_delay_seconds = self.data_ingestion_params[
-            DIP_FETCH_DELAY_SECONDS_KEY
+            cons.DIP_FETCH_DELAY_SECONDS_KEY
         ]
         self.connection_retry_delay_seconds = self.data_ingestion_params[
-            DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY
+            cons.DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY
         ]
 
     @staticmethod
@@ -148,8 +106,8 @@ class DataIngestion(ABC):
         List[dict]
             A list of dictionary representations of the FeedEntities.
         """
-        header = get_field(feed, "header")
-        list_entity = get_field(feed, "entity")
+        header = get_field(feed, cons.HEADER_KEY)
+        list_entity = get_field(feed, cons.ENTITY_KEY)
         list_dict_entities = []
         for entity in list_entity:
             list_dict_entities.extend(self._get_dicts_from_feed(header, entity))
@@ -194,11 +152,11 @@ class DataIngestion(ABC):
         """
         Check if all required parameters are present.
         """
-        for key in REQUIRED_CONNECTION_KEYS:
+        for key in cons.REQUIRED_CONNECTION_KEYS:
             if key not in self.connection_params:
                 raise ValueError(f"Missing connection parameter: {key}")
 
-        for key in REQUIRED_INGESTION_KEYS:
+        for key in cons.REQUIRED_INGESTION_KEYS:
             if key not in self.data_ingestion_params:
                 raise ValueError(f"Missing data ingestion parameter: {key}")
 
@@ -313,7 +271,7 @@ class DataIngestion(ABC):
                 try:
                     logger.info("%s: Fetching GTFS feed...", self.TABLE_NAME)
                     data = fetch_gtfs_data(
-                        self.data_ingestion_params[DIP_INGESTION_URL_KEY]
+                        self.data_ingestion_params[cons.DIP_INGESTION_URL_KEY]
                     )
                     self._process_and_insert_data(data, conn, cur)
 
@@ -358,9 +316,9 @@ class VehicleUpdatesDataIngestion(DataIngestion):
         Starts the continuous data ingestion loop.
     """
 
-    CREATE_TABLE_QUERY = VEHICLE_UPDATES_CREATE_TABLE_QUERY
-    INSERT_QUERY = VEHICLE_UPDATES_INSERT_QUERY
-    TABLE_NAME = VEHICLE_UPDATE_TABLE
+    CREATE_TABLE_QUERY = sql_queries.VEHICLE_UPDATES_CREATE_TABLE_QUERY
+    INSERT_QUERY = sql_queries.VEHICLE_UPDATES_INSERT_QUERY
+    TABLE_NAME = sql_queries.VEHICLE_UPDATE_TABLE
 
     @staticmethod
     def _get_dicts_from_feed(header, entity) -> List[Dict]:
@@ -380,39 +338,45 @@ class VehicleUpdatesDataIngestion(DataIngestion):
         List[Dict]
             A list of dictionary representations of the FeedEntity.
         """
-        vehicle = get_field(entity, "vehicle")
-        trip = get_field(vehicle, "trip")
-        position = get_field(vehicle, "position")
-        vehicle_info = get_field(vehicle, "vehicle")
+        vehicle = get_field(entity, cons.VEHICLE_KEY)
+        trip = get_field(vehicle, cons.TRIP_KEY)
+        position = get_field(vehicle, cons.POSITION_KEY)
+        vehicle_info = get_field(vehicle, cons.VEHICLE_KEY)
 
         return [
             {
-                "feed_timestamp": get_field(header, "timestamp"),
-                "entity_id": get_field(entity, "id"),
-                "trip_id": get_field(trip, "trip_id"),
-                "trip_start_time": get_field(trip, "start_time"),
-                "trip_start_date": get_field(trip, "start_date"),
-                "trip_schedule_relationship": get_field(trip, "schedule_relationship"),
-                "trip_route_id": get_field(trip, "route_id"),
-                "trip_direction_id": get_field(trip, "direction_id"),
-                "position_latitude": get_field(position, "latitude"),
-                "position_longitude": get_field(position, "longitude"),
-                "position_bearing": get_field(position, "bearing"),
-                "position_odometer": get_field(position, "odometer"),
-                "position_speed": get_field(position, "speed"),
-                "current_stop_sequence": get_field(vehicle, "current_stop_sequence"),
-                "current_status": get_field(vehicle, "current_status"),
-                "timestamp": get_field(vehicle, "timestamp"),
-                "congestion_level": get_field(vehicle, "congestion_level"),
-                "stop_id": get_field(vehicle, "stop_id"),
-                "vehicle_id": get_field(vehicle_info, "id"),
-                "vehicle_label": get_field(vehicle_info, "label"),
+                cons.FEED_TIMESTAMP_KEY: get_field(header, cons.TIMESTAMP_KEY),
+                cons.ENTITY_ID_KEY: get_field(entity, cons.ID_KEY),
+                cons.TRIP_ID_KEY: get_field(trip, cons.TRIP_ID_KEY),
+                cons.TRIP_START_TIME_KEY: get_field(trip, cons.TRIP_START_TIME_KEY),
+                cons.TRIP_START_DATE_KEY: get_field(trip, cons.TRIP_START_DATE_KEY),
+                cons.TRIP_SCHEDULE_RELATIONSHIP_KEY: get_field(
+                    trip, cons.SCHEDULE_RELATIONSHIP_KEY
+                ),
+                cons.TRIP_ROUTE_ID_KEY: get_field(trip, cons.TRIP_ROUTE_ID_KEY),
+                cons.TRIP_DIRECTION_ID_KEY: get_field(trip, cons.DIRECTION_ID_KEY),
+                cons.POSITION_LATITUDE_KEY: get_field(position, cons.LATITUDE_KEY),
+                cons.POSITION_LONGITUDE_KEY: get_field(position, cons.LONGITUDE_KEY),
+                cons.POSITION_BEARING_KEY: get_field(position, cons.BEARING_KEY),
+                cons.POSITION_ODOMETER_KEY: get_field(position, cons.ODOMETER_KEY),
+                cons.POSITION_SPEED_KEY: get_field(position, cons.SPEED_KEY),
+                cons.CURRENT_STOP_SEQUENCE_KEY: get_field(
+                    vehicle, cons.CURRENT_STOP_SEQUENCE_KEY
+                ),
+                cons.CURRENT_STATUS_KEY: get_field(vehicle, cons.CURRENT_STATUS_KEY),
+                cons.TIMESTAMP_KEY: get_field(vehicle, cons.TIMESTAMP_KEY),
+                cons.CONGESTION_LEVEL_KEY: get_field(
+                    vehicle, cons.CONGESTION_LEVEL_KEY
+                ),
+                cons.STOP_ID_KEY: get_field(vehicle, cons.STOP_ID_KEY),
+                cons.VEHICLE_ID_KEY: get_field(vehicle_info, cons.ID_KEY),
+                cons.VEHICLE_LABEL_KEY: get_field(vehicle_info, cons.LABEL_KEY),
             }
         ]
 
     @staticmethod
     def _check_duplicate_entity(entity, latest_update) -> Tuple[bool, Dict]:
-        vehicle_id = entity.get("vehicle_id")
+        vehicle_id = entity.get(cons.VEHICLE_ID_KEY)
 
         if vehicle_id is None:
             return False, latest_update
@@ -420,55 +384,59 @@ class VehicleUpdatesDataIngestion(DataIngestion):
         cond = vehicle_id not in latest_update
         cond |= (
             vehicle_id in latest_update
-            and entity["timestamp"] > latest_update[vehicle_id]
+            and entity[cons.TIMESTAMP_KEY] > latest_update[vehicle_id]
         )
 
         if cond:
-            latest_update[vehicle_id] = entity["timestamp"]
+            latest_update[vehicle_id] = entity[cons.TIMESTAMP_KEY]
 
         return cond, latest_update
 
     @staticmethod
     def _format_df_feed(df_feed: pd.DataFrame) -> pd.DataFrame:
-        df_feed["trip_start_timestamp"] = pd.to_datetime(
-            df_feed["trip_start_date"] + " " + df_feed["trip_start_time"],
+        df_feed[cons.TRIP_START_TIMESTAMP_KEY] = pd.to_datetime(
+            df_feed[cons.TRIP_START_DATE_KEY] + " " + df_feed[cons.TRIP_START_TIME_KEY],
             format="%Y%m%d %H:%M:%S",
             errors="coerce",
         )
-        df_feed["feed_timestamp"] = pd.to_datetime(df_feed["feed_timestamp"], unit="s")
-        df_feed["timestamp"] = pd.to_datetime(df_feed["timestamp"], unit="s")
+        df_feed[cons.FEED_TIMESTAMP_KEY] = pd.to_datetime(
+            df_feed[cons.FEED_TIMESTAMP_KEY], unit="s"
+        )
+        df_feed[cons.TIMESTAMP_KEY] = pd.to_datetime(
+            df_feed[cons.TIMESTAMP_KEY], unit="s"
+        )
 
         process_cols = df_feed.dtypes[df_feed.dtypes == "object"]
         for col in process_cols.index:
             df_feed[col] = df_feed[col].apply(lambda x: x if x != "" else None)
-        if "trip_start_time" in df_feed.columns:
-            del df_feed["trip_start_time"]
-        if "trip_start_date" in df_feed.columns:
-            del df_feed["trip_start_date"]
+        if cons.TRIP_START_TIME_KEY in df_feed.columns:
+            del df_feed[cons.TRIP_START_TIME_KEY]
+        if cons.TRIP_START_DATE_KEY in df_feed.columns:
+            del df_feed[cons.TRIP_START_DATE_KEY]
         col_types = {
-            "entity_id": int,
-            "trip_id": str,
-            "trip_schedule_relationship": int,
-            "trip_route_id": str,
-            "trip_direction_id": int,
-            "position_latitude": float,
-            "position_longitude": float,
-            "position_bearing": float,
-            "position_odometer": float,
-            "position_speed": float,
-            "current_stop_sequence": int,
-            "current_status": int,
-            "congestion_level": int,
-            "stop_id": str,
-            "vehicle_id": int,
-            "vehicle_label": int,
+            cons.ENTITY_ID_KEY: int,
+            cons.TRIP_ID_KEY: str,
+            cons.TRIP_SCHEDULE_RELATIONSHIP_KEY: int,
+            cons.TRIP_ROUTE_ID_KEY: str,
+            cons.TRIP_DIRECTION_ID_KEY: int,
+            cons.POSITION_LATITUDE_KEY: float,
+            cons.POSITION_LONGITUDE_KEY: float,
+            cons.POSITION_BEARING_KEY: float,
+            cons.POSITION_ODOMETER_KEY: float,
+            cons.POSITION_SPEED_KEY: float,
+            cons.CURRENT_STOP_SEQUENCE_KEY: int,
+            cons.CURRENT_STATUS_KEY: int,
+            cons.CONGESTION_LEVEL_KEY: int,
+            cons.STOP_ID_KEY: str,
+            cons.VEHICLE_ID_KEY: int,
+            cons.VEHICLE_LABEL_KEY: int,
         }
         for col, col_type in col_types.items():
             if col in df_feed.columns:
                 df_feed[col] = df_feed[col].astype(col_type)
 
         # drop cols with No trip start timestamp
-        df_feed = df_feed[~df_feed["trip_start_timestamp"].isna()].reset_index(
+        df_feed = df_feed[~df_feed[cons.TRIP_START_TIMESTAMP_KEY].isna()].reset_index(
             drop=True
         )
         return df_feed
@@ -494,9 +462,9 @@ class TripUpdatesDataIngestion(DataIngestion):
         Starts the continuous data ingestion loop.
     """
 
-    CREATE_TABLE_QUERY = TRIP_UPDATES_CREATE_TABLE_QUERY
-    INSERT_QUERY = TRIP_UPDATES_INSERT_QUERY
-    TABLE_NAME = TRIP_UPDATE_TABLE
+    CREATE_TABLE_QUERY = sql_queries.TRIP_UPDATES_CREATE_TABLE_QUERY
+    INSERT_QUERY = sql_queries.TRIP_UPDATES_INSERT_QUERY
+    TABLE_NAME = sql_queries.TRIP_UPDATE_TABLE
 
     @staticmethod
     def _get_dicts_from_feed(header, entity) -> List[Dict]:
@@ -516,36 +484,44 @@ class TripUpdatesDataIngestion(DataIngestion):
         list[Dict]
             A list of dictionary representations of the FeedEntity.
         """
-        trip_update = get_field(entity, "trip_update")
-        trip = get_field(trip_update, "trip")
-        stop_time_update = get_field(trip_update, "stop_time_update")
+        trip_update = get_field(entity, cons.TRIP_UPDATE_KEY)
+        trip = get_field(trip_update, cons.TRIP_KEY)
+        stop_time_update = get_field(trip_update, cons.STOP_TIME_UPDATE_KEY)
         base_dict = {
-            "feed_timestamp": get_field(header, "timestamp"),
-            "trip_id": get_field(trip, "trip_id"),
-            "trip_start_time": get_field(trip, "start_time"),
-            "trip_start_date": get_field(trip, "start_date"),
-            "trip_schedule_relationship": get_field(trip, "schedule_relationship"),
-            "trip_route_id": get_field(trip, "route_id"),
-            "trip_direction_id": get_field(trip, "direction_id"),
+            cons.FEED_TIMESTAMP_KEY: get_field(header, cons.TIMESTAMP_KEY),
+            cons.TRIP_ID_KEY: get_field(trip, cons.TRIP_ID_KEY),
+            cons.TRIP_START_TIME_KEY: get_field(trip, cons.TRIP_START_TIME_KEY),
+            cons.TRIP_START_DATE_KEY: get_field(trip, cons.TRIP_START_DATE_KEY),
+            cons.TRIP_SCHEDULE_RELATIONSHIP_KEY: get_field(
+                trip, cons.SCHEDULE_RELATIONSHIP_KEY
+            ),
+            cons.TRIP_ROUTE_ID_KEY: get_field(trip, cons.TRIP_ROUTE_ID_KEY),
+            cons.TRIP_DIRECTION_ID_KEY: get_field(trip, cons.DIRECTION_ID_KEY),
         }
         list_dicts = []
         if not stop_time_update:
             return list_dicts
         for stu in stop_time_update:
             dict_str = base_dict.copy()
-            arrival = get_field(stu, "arrival")
-            departure = get_field(stu, "departure")
+            arrival = get_field(stu, cons.ARRIVAL_KEY)
+            departure = get_field(stu, cons.DEPARTURE_KEY)
             dict_str.update(
                 {
-                    "stop_sequence": get_field(stu, "stop_sequence"),
-                    "stop_id": get_field(stu, "stop_id"),
-                    "schedule_relationship": get_field(stu, "schedule_relationship"),
-                    "arrival_delay": get_field(arrival, "delay"),
-                    "arrival_time": get_field(arrival, "time"),
-                    "arrival_uncertainty": get_field(arrival, "uncertainty"),
-                    "departure_delay": get_field(departure, "delay"),
-                    "departure_time": get_field(departure, "time"),
-                    "departure_uncertainty": get_field(departure, "uncertainty"),
+                    cons.STOP_SEQUENCE_KEY: get_field(stu, cons.STOP_SEQUENCE_KEY),
+                    cons.STOP_ID_KEY: get_field(stu, cons.STOP_ID_KEY),
+                    cons.SCHEDULE_RELATIONSHIP_KEY: get_field(
+                        stu, cons.SCHEDULE_RELATIONSHIP_KEY
+                    ),
+                    cons.ARRIVAL_DELAY_KEY: get_field(arrival, cons.DELAY_KEY),
+                    cons.ARRIVAL_TIME_KEY: get_field(arrival, cons.TIME_KEY),
+                    cons.ARRIVAL_UNCERTAINTY_KEY: get_field(
+                        arrival, cons.UNCERTAINTY_KEY
+                    ),
+                    cons.DEPARTURE_DELAY_KEY: get_field(departure, cons.DELAY_KEY),
+                    cons.DEPARTURE_TIME_KEY: get_field(departure, cons.TIME_KEY),
+                    cons.DEPARTURE_UNCERTAINTY_KEY: get_field(
+                        departure, cons.UNCERTAINTY_KEY
+                    ),
                 }
             )
             list_dicts.append(dict_str)
@@ -564,8 +540,8 @@ class TripUpdatesDataIngestion(DataIngestion):
             "departure_uncertainty",
         ]
 
-        trip_id = entity.get("trip_id")
-        stop_id = entity.get("stop_id")
+        trip_id = entity.get(cons.TRIP_ID_KEY)
+        stop_id = entity.get(cons.STOP_ID_KEY)
         cond = False
 
         # If we don't have valid identifiers, we cannot reliably deduplicate.
@@ -589,8 +565,8 @@ class TripUpdatesDataIngestion(DataIngestion):
 
     @staticmethod
     def _format_df_feed(df_feed: pd.DataFrame) -> pd.DataFrame:
-        df_feed["trip_start_timestamp"] = pd.to_datetime(
-            df_feed["trip_start_date"] + " " + df_feed["trip_start_time"],
+        df_feed[cons.TRIP_START_TIMESTAMP_KEY] = pd.to_datetime(
+            df_feed[cons.TRIP_START_DATE_KEY] + " " + df_feed[cons.TRIP_START_TIME_KEY],
             format="%Y%m%d %H:%M:%S",
             errors="coerce",
         )
@@ -598,12 +574,16 @@ class TripUpdatesDataIngestion(DataIngestion):
         process_cols = df_feed.dtypes[df_feed.dtypes == "object"]
         for col in process_cols.index:
             df_feed[col] = df_feed[col].apply(lambda x: x if x != "" else None)
-        if "trip_start_time" in df_feed.columns:
-            del df_feed["trip_start_time"]
-        if "trip_start_date" in df_feed.columns:
-            del df_feed["trip_start_date"]
+        if cons.TRIP_START_TIME_KEY in df_feed.columns:
+            del df_feed[cons.TRIP_START_TIME_KEY]
+        if cons.TRIP_START_DATE_KEY in df_feed.columns:
+            del df_feed[cons.TRIP_START_DATE_KEY]
 
-        time_columns = ["feed_timestamp", "arrival_time", "departure_time"]
+        time_columns = [
+            cons.FEED_TIMESTAMP_KEY,
+            cons.ARRIVAL_TIME_KEY,
+            cons.DEPARTURE_TIME_KEY,
+        ]
         for col in time_columns:
             df_feed[col] = df_feed[col].apply(
                 lambda x: (

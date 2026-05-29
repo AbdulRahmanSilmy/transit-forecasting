@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 import yaml
 
-from .data_ingestion import (
+from .constants import (
     CONFIG_PATH,
     CONNECTION_PARAMS_KEY,
     DATA_INGESTION_PARAMS_KEY,

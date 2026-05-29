@@ -3,14 +3,12 @@ SQL queries for creating table and inserting data into the database.
 
 TODO:
 - Move these queries to actual sql files and load them as needed.
-- check if docstring can support f-strings for table names.
 """
 
-VEHICLE_UPDATE_TABLE = "TRANSIT_VEHICLE_TABLE"
-TRIP_UPDATE_TABLE = "TRANSIT_TRIP_TABLE"
+from .constants import TRIP_UPDATE_TABLE, VEHICLE_UPDATE_TABLE
 
-VEHICLE_UPDATES_CREATE_TABLE_QUERY = """
-CREATE TABLE IF NOT EXISTS TRANSIT_VEHICLE_TABLE (
+VEHICLE_UPDATES_CREATE_TABLE_QUERY = f"""
+CREATE TABLE IF NOT EXISTS {VEHICLE_UPDATE_TABLE} (
     id INT AUTO_INCREMENT PRIMARY KEY,
     feed_timestamp TIMESTAMP,
     entity_id INT,
@@ -34,8 +32,9 @@ CREATE TABLE IF NOT EXISTS TRANSIT_VEHICLE_TABLE (
     read_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
-VEHICLE_UPDATES_INSERT_QUERY = """
-INSERT INTO TRANSIT_VEHICLE_TABLE (
+
+VEHICLE_UPDATES_INSERT_QUERY = f"""
+INSERT INTO {VEHICLE_UPDATE_TABLE} (
     feed_timestamp, entity_id, trip_id, trip_schedule_relationship,
     trip_route_id, trip_direction_id, position_latitude, position_longitude,
     position_bearing, position_odometer, position_speed, current_stop_sequence,
@@ -45,8 +44,8 @@ INSERT INTO TRANSIT_VEHICLE_TABLE (
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
-TRIP_UPDATES_CREATE_TABLE_QUERY = """
-CREATE TABLE IF NOT EXISTS TRANSIT_TRIP_TABLE (
+TRIP_UPDATES_CREATE_TABLE_QUERY = f"""
+CREATE TABLE IF NOT EXISTS {TRIP_UPDATE_TABLE} (
     id INT AUTO_INCREMENT PRIMARY KEY,
     feed_timestamp TIMESTAMP,
     trip_id VARCHAR(50),
@@ -65,8 +64,9 @@ CREATE TABLE IF NOT EXISTS TRANSIT_TRIP_TABLE (
     trip_start_timestamp TIMESTAMP
 );
 """
-TRIP_UPDATES_INSERT_QUERY = """
-INSERT INTO TRANSIT_TRIP_TABLE (
+
+TRIP_UPDATES_INSERT_QUERY = f"""
+INSERT INTO {TRIP_UPDATE_TABLE} (
     feed_timestamp,
     trip_id,
     trip_schedule_relationship,
