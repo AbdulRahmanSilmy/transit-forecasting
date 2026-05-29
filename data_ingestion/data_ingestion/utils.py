@@ -1,18 +1,14 @@
-"""
-Utility functions for GTFS real-time data ingestion and processing.
+"""Utility functions for GTFS real-time data ingestion and processing."""
 
-TODO:
--------
-- Improve format data for db function
-- Replace print statements with logging
-"""
-
+import logging
 from typing import List
 
 import pandas as pd
 import requests
 from google.transit import gtfs_realtime_pb2
-from requests.exceptions import ConnectionError, HTTPError, Timeout
+from requests.exceptions import Timeout
+
+logger = logging.getLogger(__name__)
 
 
 def fetch_gtfs_data(url: str) -> bytes | None:
@@ -24,21 +20,23 @@ def fetch_gtfs_data(url: str) -> bytes | None:
         response = requests.get(url, timeout=5)
         response.raise_for_status()  # Raise exception for 4xx/5xx responses
         return response.content
-    except (Timeout, ConnectionError):
-        print("Network error or timeout occurred while fetching GTFS data.")
-    except HTTPError as e:
-        print(f"HTTP error: {e}")
-    except Exception as e:
-        print(f"Unexpected error: {e}")
+    except (Timeout, requests.exceptions.ConnectionError):
+        logger.exception("Network error or timeout occurred while fetching GTFS data.")
+    except requests.exceptions.HTTPError as e:
+        logger.exception("HTTP error while fetching GTFS data: %s", e)
+    except requests.exceptions.RequestException as e:
+        logger.exception("Unexpected error while fetching GTFS data: %s", e)
 
     return None
 
 
-def parse_gtfs_data(data: bytes) -> gtfs_realtime_pb2.FeedMessage | None:
+def parse_gtfs_data(data: bytes):
     """
     Parse GTFS real-time data from bytes.
     """
+    # pylint: disable=no-member
     feed = gtfs_realtime_pb2.FeedMessage()
+    # pylint: enable=no-member
     feed.ParseFromString(data)
     return feed
 
@@ -93,7 +91,7 @@ def get_dict_from_feed(header, entity) -> dict:
     }
 
 
-def extract_feed_info(feed: gtfs_realtime_pb2.FeedEntity) -> List[dict]:
+def extract_feed_info(feed) -> List[dict]:
     """
     Convert a FeedEntity to a dictionary, handling missing fields gracefully.
 
@@ -220,6 +218,6 @@ def format_data_for_db(df_feed: pd.DataFrame) -> pd.DataFrame:
         if col in df_feed.columns:
             df_feed[col] = df_feed[col].astype(col_type)
 
-    # drop cols with No trip start timestamp
+    # Drop rows with missing trip start timestamps before DB insertion.
     df_feed = df_feed[~df_feed["trip_start_timestamp"].isna()].reset_index(drop=True)
     return df_feed
