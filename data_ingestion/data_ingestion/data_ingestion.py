@@ -73,6 +73,12 @@ class DataIngestion(ABC):
         Dictionary containing data ingestion parameters.
         Should include keys: ingestion_url, fetch_delay_seconds, connection_retry_delay_seconds.
 
+    Notes
+    -----
+    Each ingestion instance owns its own ``_latest_update`` state. The current
+    runner creates one instance per thread, so duplicate tracking is thread-safe
+    as long as instances are not shared across threads.
+
     Methods
     -------
     run_ingestion_loop()
@@ -93,6 +99,14 @@ class DataIngestion(ABC):
             raise TypeError(f"{cls.__name__} must define 'TABLE_NAME'")
 
     def __init__(self, connection_params: dict, data_ingestion_params: dict):
+        """Initialize the ingestion instance and its per-instance duplicate state.
+
+        Notes
+        -----
+        ``_latest_update`` is intentionally instance-local. If a single
+        ``DataIngestion`` instance is shared across threads in the future, the
+        duplicate-tracking state will need synchronization.
+        """
         self.connection_params = connection_params
         self.data_ingestion_params = data_ingestion_params
         self._latest_update = {}
