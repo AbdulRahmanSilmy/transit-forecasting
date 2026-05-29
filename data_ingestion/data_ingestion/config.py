@@ -1,6 +1,4 @@
-"""
-Configuration loading and validation helpers.
-"""
+"""Configuration loading and validation helpers."""
 from __future__ import annotations
 
 from typing import Any, Dict
@@ -24,6 +22,22 @@ class ConfigError(ValueError):
 
 
 def _validate_required_keys(section: Dict[str, Any], required_keys: list[str], path: str) -> None:
+    """Validate that required keys are present in a section.
+
+    Parameters
+    ----------
+    section : dict[str, Any]
+        Section to validate.
+    required_keys : list[str]
+        Keys that must be present.
+    path : str
+        Configuration path used in error messages.
+
+    Raises
+    ------
+    ConfigError
+        If any required keys are missing.
+    """
     missing = [key for key in required_keys if key not in section]
     if missing:
         missing_list = ", ".join(missing)
@@ -31,14 +45,42 @@ def _validate_required_keys(section: Dict[str, Any], required_keys: list[str], p
 
 
 def _ensure_dict(value: Any, path: str) -> Dict[str, Any]:
+    """Ensure a value is a mapping.
+
+    Parameters
+    ----------
+    value : Any
+        Value to validate.
+    path : str
+        Configuration path used in error messages.
+
+    Returns
+    -------
+    dict[str, Any]
+        The validated mapping.
+
+    Raises
+    ------
+    ConfigError
+        If the value is not a mapping.
+    """
     if not isinstance(value, dict):
         raise ConfigError(f"Expected a mapping at '{path}'")
     return value
 
 
 def validate_config(config: Dict[str, Any]) -> None:
-    """
-    Validate configuration structure and required fields.
+    """Validate configuration structure and required fields.
+
+    Parameters
+    ----------
+    config : dict[str, Any]
+        Parsed configuration mapping.
+
+    Raises
+    ------
+    ConfigError
+        If required sections or keys are missing.
     """
     _ensure_dict(config, "root")
 
@@ -81,8 +123,22 @@ def validate_config(config: Dict[str, Any]) -> None:
 
 
 def load_config(config_path: str = CONFIG_PATH) -> Dict[str, Any]:
-    """
-    Load configuration from a YAML file and validate required fields.
+    """Load configuration from a YAML file and validate required fields.
+
+    Parameters
+    ----------
+    config_path : str, optional
+        Path to the YAML configuration file.
+
+    Returns
+    -------
+    dict[str, Any]
+        Validated configuration mapping.
+
+    Raises
+    ------
+    ConfigError
+        If the file is empty or missing required keys.
     """
     with open(config_path, "r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
