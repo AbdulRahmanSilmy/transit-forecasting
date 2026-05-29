@@ -14,13 +14,12 @@ import logging
 import threading
 
 from .config import CONFIG_PATH, load_config
-from .data_ingestion import (
+from .constants import (
     CONNECTION_PARAMS_KEY,
     DATA_INGESTION_PARAMS_KEY,
     LOGGING_FILE_KEY,
-    TripUpdatesDataIngestion,
-    VehicleUpdatesDataIngestion,
 )
+from .data_ingestion import TripUpdatesDataIngestion, VehicleUpdatesDataIngestion
 
 logger = logging.getLogger(__name__)
 
