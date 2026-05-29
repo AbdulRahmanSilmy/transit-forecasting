@@ -71,8 +71,31 @@ def main(config_path: str = CONFIG_PATH):
     )
 
     # run ingestion loops concurrently
-    threading.Thread(target=vu_data_ingestion.run_ingestion_loop).start()
-    threading.Thread(target=tu_data_ingestion.run_ingestion_loop).start()
+    stop_event = threading.Event()
+    threads = [
+        threading.Thread(
+            target=vu_data_ingestion.run_ingestion_loop,
+            args=(stop_event,),
+            name="vehicle_updates_ingestion",
+        ),
+        threading.Thread(
+            target=tu_data_ingestion.run_ingestion_loop,
+            args=(stop_event,),
+            name="trip_updates_ingestion",
+        ),
+    ]
+
+    for thread in threads:
+        thread.start()
+
+    try:
+        for thread in threads:
+            thread.join()
+    except KeyboardInterrupt:
+        logger.info("Shutdown requested. Stopping ingestion threads...")
+        stop_event.set()
+        for thread in threads:
+            thread.join()
 
 
 if __name__ == "__main__":

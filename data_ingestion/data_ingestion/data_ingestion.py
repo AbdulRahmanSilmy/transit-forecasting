@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 import time
 from typing import List, Tuple, Dict
 import logging
+import threading
 import mysql.connector
 import pandas as pd
 
@@ -192,7 +193,7 @@ class DataIngestion(ABC):
             if key not in self.data_ingestion_params:
                 raise ValueError(f"Missing data ingestion parameter: {key}")
 
-    def _get_sql_connection(self) -> tuple:
+    def _get_sql_connection(self, stop_event: threading.Event) -> tuple:
         """
         Establishes a connection to the MySQL database with retry logic.
 
@@ -205,7 +206,7 @@ class DataIngestion(ABC):
             Cursor object for executing queries.
         """
         connection_state = False
-        while connection_state is False:
+        while connection_state is False and not stop_event.is_set():
             try:
                 conn = mysql.connector.connect(
                     **self.connection_params
@@ -217,7 +218,10 @@ class DataIngestion(ABC):
             except mysql.connector.Error:
                 logger.exception(
                     "%s: Failed to connect to MySQL", self.TABLE_NAME)
-                time.sleep(self.connection_retry_delay_seconds)
+                stop_event.wait(self.connection_retry_delay_seconds)
+
+        if stop_event.is_set():
+            return None, None
 
         return conn, cur
 
@@ -280,32 +284,46 @@ class DataIngestion(ABC):
         else:
             logger.warning("%s: No data received from feed.", self.TABLE_NAME)
 
-    def run_ingestion_loop(self):
+    def run_ingestion_loop(self, stop_event: threading.Event):
         """
         Starts the continuous data ingestion loop. Continually fetches data 
         from the GTFS-Realtime feed, processes it, and inserts it into the 
         MySQL database.
         """
-        conn, cur = self._get_sql_connection()
-        self._create_table_if_not_exists(conn, cur)
+        conn = None
+        cur = None
+        try:
+            conn, cur = self._get_sql_connection(stop_event)
+            if conn is None or cur is None:
+                return
 
-        while True:
-            try:
-                logger.info("%s: Fetching GTFS feed...", self.TABLE_NAME)
-                data = fetch_gtfs_data(
-                    self.data_ingestion_params[DIP_INGESTION_URL_KEY])
-                self._process_and_insert_data(data, conn, cur)
+            self._create_table_if_not_exists(conn, cur)
 
-            except mysql.connector.Error:
-                logger.exception(
-                    "%s: MySQL error, will attempt reconnection.", self.TABLE_NAME)
-                conn, cur = self._get_sql_connection()
+            while not stop_event.is_set():
+                try:
+                    logger.info("%s: Fetching GTFS feed...", self.TABLE_NAME)
+                    data = fetch_gtfs_data(
+                        self.data_ingestion_params[DIP_INGESTION_URL_KEY])
+                    self._process_and_insert_data(data, conn, cur)
 
-            # pylint: disable=broad-except
-            except Exception:
-                logger.exception("%s: Unexpected error.", self.TABLE_NAME)
-            # Sleep between feed fetches (adjust to feed update interval)
-            time.sleep(self.fetch_delay_seconds)
+                except mysql.connector.Error:
+                    logger.exception(
+                        "%s: MySQL error, will attempt reconnection.", self.TABLE_NAME)
+                    conn, cur = self._get_sql_connection(stop_event)
+                    if conn is None or cur is None:
+                        return
+
+                # pylint: disable=broad-except
+                except Exception:
+                    logger.exception("%s: Unexpected error.", self.TABLE_NAME)
+
+                # Sleep between feed fetches (adjust to feed update interval)
+                stop_event.wait(self.fetch_delay_seconds)
+        finally:
+            if cur is not None:
+                cur.close()
+            if conn is not None:
+                conn.close()
 
 
 class VehicleUpdatesDataIngestion(DataIngestion):
