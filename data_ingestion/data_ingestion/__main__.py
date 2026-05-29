@@ -11,15 +11,16 @@ connection and data ingestion settings.
 import argparse
 import logging
 import threading
-import yaml
-
-from .data_ingestion import (
+from .config import (
     CONFIG_PATH,
+    load_config,
+)
+from .data_ingestion import (
     CONNECTION_PARAMS_KEY,
     DATA_INGESTION_PARAMS_KEY,
     LOGGING_FILE_KEY,
     VehicleUpdatesDataIngestion,
-    TripUpdatesDataIngestion
+    TripUpdatesDataIngestion,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,8 +37,7 @@ def main(config_path: str = CONFIG_PATH):
     """
 
     # Load configuration
-    with open(config_path, 'r', encoding='utf-8') as file:
-        config = yaml.safe_load(file)
+    config = load_config(config_path)
 
     connection_params = config.get(CONNECTION_PARAMS_KEY, {})
 
