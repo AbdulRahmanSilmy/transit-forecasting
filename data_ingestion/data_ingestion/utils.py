@@ -4,6 +4,7 @@ Utility functions for GTFS real-time data ingestion and processing.
 TODO:
 -------
 - Improve format data for db function
+- Add documentation for all functions
 - Replace print statements with logging
 """
 
