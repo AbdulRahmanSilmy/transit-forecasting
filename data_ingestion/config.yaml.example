@@ -18,4 +18,3 @@ trip_updates:
     connection_retry_delay_seconds: 10
 
 logging_file: "data_ingestion.log"
-

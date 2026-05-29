@@ -1,16 +1,18 @@
 """Configuration loading and validation helpers."""
+
 from __future__ import annotations
 
 from typing import Any, Dict
+
 import yaml
 
 from .data_ingestion import (
     CONFIG_PATH,
     CONNECTION_PARAMS_KEY,
-    REQUIRED_CONNECTION_KEYS,
     DATA_INGESTION_PARAMS_KEY,
-    REQUIRED_INGESTION_KEYS,
     LOGGING_FILE_KEY,
+    REQUIRED_CONNECTION_KEYS,
+    REQUIRED_INGESTION_KEYS,
 )
 
 VEHICLE_UPDATES_KEY = "vehicle_updates"
@@ -21,7 +23,9 @@ class ConfigError(ValueError):
     """Raised when configuration validation fails."""
 
 
-def _validate_required_keys(section: Dict[str, Any], required_keys: list[str], path: str) -> None:
+def _validate_required_keys(
+    section: Dict[str, Any], required_keys: list[str], path: str
+) -> None:
     """Validate that required keys are present in a section.
 
     Parameters
@@ -91,9 +95,7 @@ def validate_config(config: Dict[str, Any]) -> None:
         connection_params, REQUIRED_CONNECTION_KEYS, CONNECTION_PARAMS_KEY
     )
 
-    vehicle_section = _ensure_dict(
-        config.get(VEHICLE_UPDATES_KEY), VEHICLE_UPDATES_KEY
-    )
+    vehicle_section = _ensure_dict(config.get(VEHICLE_UPDATES_KEY), VEHICLE_UPDATES_KEY)
     vehicle_params = _ensure_dict(
         vehicle_section.get(DATA_INGESTION_PARAMS_KEY),
         f"{VEHICLE_UPDATES_KEY}.{DATA_INGESTION_PARAMS_KEY}",
@@ -104,9 +106,7 @@ def validate_config(config: Dict[str, Any]) -> None:
         f"{VEHICLE_UPDATES_KEY}.{DATA_INGESTION_PARAMS_KEY}",
     )
 
-    trip_section = _ensure_dict(
-        config.get(TRIP_UPDATES_KEY), TRIP_UPDATES_KEY
-    )
+    trip_section = _ensure_dict(config.get(TRIP_UPDATES_KEY), TRIP_UPDATES_KEY)
     trip_params = _ensure_dict(
         trip_section.get(DATA_INGESTION_PARAMS_KEY),
         f"{TRIP_UPDATES_KEY}.{DATA_INGESTION_PARAMS_KEY}",

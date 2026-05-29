@@ -5,6 +5,7 @@ TODO:
 - Move these queries to actual sql files and load them as needed.
 - check if docstring can support f-strings for table names.
 """
+
 VEHICLE_UPDATE_TABLE = "TRANSIT_VEHICLE_TABLE"
 TRIP_UPDATE_TABLE = "TRANSIT_TRIP_TABLE"
 

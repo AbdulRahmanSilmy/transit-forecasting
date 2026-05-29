@@ -1,34 +1,32 @@
 """
 INTRO
 -----
-Contains the data ingestion scripts for populating each table in the database 
-is encapsulated within its respective data ingestion classes 
+Contains the data ingestion scripts for populating each table in the database
+is encapsulated within its respective data ingestion classes
 
 The following are currently populated tables and their respective classes:
 - Vehicle Updates -> VehicleUpdatesDataIngestion
 - Trip Updates -> TripUpdatesDataIngestion
 
 """
-from abc import ABC, abstractmethod
-from typing import List, Tuple, Dict
+
 import logging
 import threading
+from abc import ABC, abstractmethod
+from typing import Dict, List, Tuple
+
 import mysql.connector
 import pandas as pd
 
-from .utils import (
-    fetch_gtfs_data,
-    parse_gtfs_data,
-    get_field
-)
 from .queries import (
+    TRIP_UPDATE_TABLE,
+    TRIP_UPDATES_CREATE_TABLE_QUERY,
+    TRIP_UPDATES_INSERT_QUERY,
     VEHICLE_UPDATE_TABLE,
     VEHICLE_UPDATES_CREATE_TABLE_QUERY,
     VEHICLE_UPDATES_INSERT_QUERY,
-    TRIP_UPDATE_TABLE,
-    TRIP_UPDATES_CREATE_TABLE_QUERY,
-    TRIP_UPDATES_INSERT_QUERY
 )
+from .utils import fetch_gtfs_data, get_field, parse_gtfs_data
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +43,7 @@ REQUIRED_CONNECTION_KEYS = [
     CP_USER_KEY,
     CP_PASSWORD_KEY,
     CP_DATABASE_KEY,
-    CP_PORT_KEY
+    CP_PORT_KEY,
 ]
 
 DATA_INGESTION_PARAMS_KEY = "data_ingestion_params"
@@ -55,7 +53,7 @@ DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY = "connection_retry_delay_seconds"
 REQUIRED_INGESTION_KEYS = [
     DIP_INGESTION_URL_KEY,
     DIP_FETCH_DELAY_SECONDS_KEY,
-    DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY
+    DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY,
 ]
 
 LOGGING_FILE_KEY = "logging_file"
@@ -80,6 +78,7 @@ class DataIngestion(ABC):
     run_ingestion_loop()
         Starts the continuous data ingestion loop.
     """
+
     CREATE_TABLE_QUERY: str = None
     INSERT_QUERY: str = None
     TABLE_NAME: str = None
@@ -87,8 +86,7 @@ class DataIngestion(ABC):
     def __init_subclass__(cls):
         super().__init_subclass__()
         if cls.CREATE_TABLE_QUERY is None:
-            raise TypeError(
-                f"{cls.__name__} must define 'CREATE_TABLE_QUERY'")
+            raise TypeError(f"{cls.__name__} must define 'CREATE_TABLE_QUERY'")
         if cls.INSERT_QUERY is None:
             raise TypeError(f"{cls.__name__} must define 'INSERT_QUERY'")
         if cls.TABLE_NAME is None:
@@ -100,11 +98,12 @@ class DataIngestion(ABC):
         self._latest_update = {}
 
         self._check_parameters()
-        self.fetch_delay_seconds = self.data_ingestion_params[DIP_FETCH_DELAY_SECONDS_KEY]
+        self.fetch_delay_seconds = self.data_ingestion_params[
+            DIP_FETCH_DELAY_SECONDS_KEY
+        ]
         self.connection_retry_delay_seconds = self.data_ingestion_params[
             DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY
         ]
-
 
     @staticmethod
     @abstractmethod
@@ -139,15 +138,12 @@ class DataIngestion(ABC):
         list_entity = get_field(feed, "entity")
         list_dict_entities = []
         for entity in list_entity:
-            list_dict_entities.extend(
-                self._get_dicts_from_feed(header, entity))
+            list_dict_entities.extend(self._get_dicts_from_feed(header, entity))
 
         return list_dict_entities
 
     def _get_df_feed(
-        self,
-        list_dict_entities: List[dict],
-        latest_updates: dict
+        self, list_dict_entities: List[dict], latest_updates: dict
     ) -> pd.DataFrame:
         """
         Convert a list of dictionary representations of FeedEntities to a DataFrame.
@@ -158,7 +154,7 @@ class DataIngestion(ABC):
             A list of dictionary representations of the FeedEntities.
 
         latest_updates: dict
-            A tracking structure to identify and filter out duplicate entities based on their 
+            A tracking structure to identify and filter out duplicate entities based on their
             unique identifiers.
         Returns
         -------
@@ -182,7 +178,7 @@ class DataIngestion(ABC):
 
     def _check_parameters(self):
         """
-            Check if all required parameters are present.
+        Check if all required parameters are present.
         """
         for key in REQUIRED_CONNECTION_KEYS:
             if key not in self.connection_params:
@@ -207,16 +203,12 @@ class DataIngestion(ABC):
         connection_state = False
         while connection_state is False and not stop_event.is_set():
             try:
-                conn = mysql.connector.connect(
-                    **self.connection_params
-                )
+                conn = mysql.connector.connect(**self.connection_params)
                 cur = conn.cursor()
-                logger.info("%s: Connected to MySQL database.",
-                            self.TABLE_NAME)
+                logger.info("%s: Connected to MySQL database.", self.TABLE_NAME)
                 connection_state = True
             except mysql.connector.Error:
-                logger.exception(
-                    "%s: Failed to connect to MySQL", self.TABLE_NAME)
+                logger.exception("%s: Failed to connect to MySQL", self.TABLE_NAME)
                 stop_event.wait(self.connection_retry_delay_seconds)
 
         if stop_event.is_set():
@@ -258,25 +250,30 @@ class DataIngestion(ABC):
         if data:
             feed = parse_gtfs_data(data)
             entities = self._extract_feed_info(feed)
-            logger.info("%s: Feed retrieved with %d entities.",
-                        self.TABLE_NAME, len(feed.entity))
+            logger.info(
+                "%s: Feed retrieved with %d entities.",
+                self.TABLE_NAME,
+                len(feed.entity),
+            )
 
             df_feed, self._latest_update = self._get_df_feed(
-                entities, self._latest_update)
+                entities, self._latest_update
+            )
 
             if not df_feed.empty:
                 df_feed = self._format_df_feed(df_feed)
 
                 # Convert DataFrame to list of tuples
-                data_to_insert = [tuple(row)[1:]
-                                  for row in df_feed.itertuples()]
+                data_to_insert = [tuple(row)[1:] for row in df_feed.itertuples()]
 
-                logger.info("%s: Inserting %d rows into the database...",
-                            self.TABLE_NAME, len(data_to_insert))
+                logger.info(
+                    "%s: Inserting %d rows into the database...",
+                    self.TABLE_NAME,
+                    len(data_to_insert),
+                )
                 cur.executemany(self.INSERT_QUERY, data_to_insert)
                 conn.commit()
-                logger.info("%s: Insert committed successfully.",
-                            self.TABLE_NAME)
+                logger.info("%s: Insert committed successfully.", self.TABLE_NAME)
             else:
                 logger.info("%s: No new data to insert.", self.TABLE_NAME)
 
@@ -285,8 +282,8 @@ class DataIngestion(ABC):
 
     def run_ingestion_loop(self, stop_event: threading.Event):
         """
-        Starts the continuous data ingestion loop. Continually fetches data 
-        from the GTFS-Realtime feed, processes it, and inserts it into the 
+        Starts the continuous data ingestion loop. Continually fetches data
+        from the GTFS-Realtime feed, processes it, and inserts it into the
         MySQL database.
         """
         conn = None
@@ -302,12 +299,14 @@ class DataIngestion(ABC):
                 try:
                     logger.info("%s: Fetching GTFS feed...", self.TABLE_NAME)
                     data = fetch_gtfs_data(
-                        self.data_ingestion_params[DIP_INGESTION_URL_KEY])
+                        self.data_ingestion_params[DIP_INGESTION_URL_KEY]
+                    )
                     self._process_and_insert_data(data, conn, cur)
 
                 except mysql.connector.Error:
                     logger.exception(
-                        "%s: MySQL error, will attempt reconnection.", self.TABLE_NAME)
+                        "%s: MySQL error, will attempt reconnection.", self.TABLE_NAME
+                    )
                     conn, cur = self._get_sql_connection(stop_event)
                     if conn is None or cur is None:
                         return
@@ -344,6 +343,7 @@ class VehicleUpdatesDataIngestion(DataIngestion):
     run_ingestion_loop()
         Starts the continuous data ingestion loop.
     """
+
     CREATE_TABLE_QUERY = VEHICLE_UPDATES_CREATE_TABLE_QUERY
     INSERT_QUERY = VEHICLE_UPDATES_INSERT_QUERY
     TABLE_NAME = VEHICLE_UPDATE_TABLE
@@ -371,87 +371,92 @@ class VehicleUpdatesDataIngestion(DataIngestion):
         position = get_field(vehicle, "position")
         vehicle_info = get_field(vehicle, "vehicle")
 
-        return [{
-            "feed_timestamp": get_field(header, "timestamp"),
-            "entity_id": get_field(entity, "id"),
-            "trip_id": get_field(trip, "trip_id"),
-            "trip_start_time": get_field(trip, "start_time"),
-            "trip_start_date": get_field(trip, "start_date"),
-            "trip_schedule_relationship": get_field(trip, "schedule_relationship"),
-            "trip_route_id": get_field(trip, "route_id"),
-            "trip_direction_id": get_field(trip, "direction_id"),
-            "position_latitude": get_field(position, "latitude"),
-            "position_longitude": get_field(position, "longitude"),
-            "position_bearing": get_field(position, "bearing"),
-            "position_odometer": get_field(position, "odometer"),
-            "position_speed": get_field(position, "speed"),
-            "current_stop_sequence": get_field(vehicle, "current_stop_sequence"),
-            "current_status": get_field(vehicle, "current_status"),
-            "timestamp": get_field(vehicle, "timestamp"),
-            "congestion_level": get_field(vehicle, "congestion_level"),
-            "stop_id": get_field(vehicle, "stop_id"),
-            "vehicle_id": get_field(vehicle_info, "id"),
-            "vehicle_label": get_field(vehicle_info, "label"),
-        }]
+        return [
+            {
+                "feed_timestamp": get_field(header, "timestamp"),
+                "entity_id": get_field(entity, "id"),
+                "trip_id": get_field(trip, "trip_id"),
+                "trip_start_time": get_field(trip, "start_time"),
+                "trip_start_date": get_field(trip, "start_date"),
+                "trip_schedule_relationship": get_field(trip, "schedule_relationship"),
+                "trip_route_id": get_field(trip, "route_id"),
+                "trip_direction_id": get_field(trip, "direction_id"),
+                "position_latitude": get_field(position, "latitude"),
+                "position_longitude": get_field(position, "longitude"),
+                "position_bearing": get_field(position, "bearing"),
+                "position_odometer": get_field(position, "odometer"),
+                "position_speed": get_field(position, "speed"),
+                "current_stop_sequence": get_field(vehicle, "current_stop_sequence"),
+                "current_status": get_field(vehicle, "current_status"),
+                "timestamp": get_field(vehicle, "timestamp"),
+                "congestion_level": get_field(vehicle, "congestion_level"),
+                "stop_id": get_field(vehicle, "stop_id"),
+                "vehicle_id": get_field(vehicle_info, "id"),
+                "vehicle_label": get_field(vehicle_info, "label"),
+            }
+        ]
 
     @staticmethod
     def _check_duplicate_entity(entity, latest_update) -> Tuple[bool, Dict]:
-        vehicle_id = entity.get('vehicle_id')
+        vehicle_id = entity.get("vehicle_id")
 
         if vehicle_id is None:
             return False, latest_update
-        
+
         cond = vehicle_id not in latest_update
-        cond |= (vehicle_id in latest_update and
-                 entity['timestamp'] > latest_update[vehicle_id])
+        cond |= (
+            vehicle_id in latest_update
+            and entity["timestamp"] > latest_update[vehicle_id]
+        )
 
         if cond:
-            latest_update[vehicle_id] = entity['timestamp']
+            latest_update[vehicle_id] = entity["timestamp"]
 
         return cond, latest_update
 
     @staticmethod
     def _format_df_feed(df_feed: pd.DataFrame) -> pd.DataFrame:
-        df_feed['trip_start_timestamp'] = pd.to_datetime(
-            df_feed['trip_start_date'] + ' ' + df_feed['trip_start_time'],
-            format='%Y%m%d %H:%M:%S', errors='coerce'
+        df_feed["trip_start_timestamp"] = pd.to_datetime(
+            df_feed["trip_start_date"] + " " + df_feed["trip_start_time"],
+            format="%Y%m%d %H:%M:%S",
+            errors="coerce",
         )
-        df_feed['feed_timestamp'] = pd.to_datetime(
-            df_feed['feed_timestamp'], unit='s')
-        df_feed['timestamp'] = pd.to_datetime(df_feed['timestamp'], unit='s')
+        df_feed["feed_timestamp"] = pd.to_datetime(df_feed["feed_timestamp"], unit="s")
+        df_feed["timestamp"] = pd.to_datetime(df_feed["timestamp"], unit="s")
 
-        process_cols = df_feed.dtypes[df_feed.dtypes == object]
+        process_cols = df_feed.dtypes[df_feed.dtypes == "object"]
         for col in process_cols.index:
-            df_feed[col] = df_feed[col].apply(lambda x: x if x != '' else None)
-        if 'trip_start_time' in df_feed.columns:
-            del df_feed['trip_start_time']
-        if 'trip_start_date' in df_feed.columns:
-            del df_feed['trip_start_date']
+            df_feed[col] = df_feed[col].apply(lambda x: x if x != "" else None)
+        if "trip_start_time" in df_feed.columns:
+            del df_feed["trip_start_time"]
+        if "trip_start_date" in df_feed.columns:
+            del df_feed["trip_start_date"]
         col_types = {
-            'entity_id': int,
-            'trip_id': str,
-            'trip_schedule_relationship': int,
-            'trip_route_id': str,
-            'trip_direction_id': int,
-            'position_latitude': float,
-            'position_longitude': float,
-            'position_bearing': float,
-            'position_odometer': float,
-            'position_speed': float,
-            'current_stop_sequence': int,
-            'current_status': int,
-            'congestion_level': int,
-            'stop_id': str,
-            'vehicle_id': int,
-            'vehicle_label': int
+            "entity_id": int,
+            "trip_id": str,
+            "trip_schedule_relationship": int,
+            "trip_route_id": str,
+            "trip_direction_id": int,
+            "position_latitude": float,
+            "position_longitude": float,
+            "position_bearing": float,
+            "position_odometer": float,
+            "position_speed": float,
+            "current_stop_sequence": int,
+            "current_status": int,
+            "congestion_level": int,
+            "stop_id": str,
+            "vehicle_id": int,
+            "vehicle_label": int,
         }
         for col, col_type in col_types.items():
             if col in df_feed.columns:
                 df_feed[col] = df_feed[col].astype(col_type)
 
         # drop cols with No trip start timestamp
-        df_feed = df_feed[~df_feed['trip_start_timestamp'].isna()].reset_index(
-            drop=True)
+        df_feed = df_feed[~df_feed["trip_start_timestamp"].isna()].reset_index(
+            drop=True
+        )
         return df_feed
 
 
@@ -474,6 +479,7 @@ class TripUpdatesDataIngestion(DataIngestion):
     run_ingestion_loop()
         Starts the continuous data ingestion loop.
     """
+
     CREATE_TABLE_QUERY = TRIP_UPDATES_CREATE_TABLE_QUERY
     INSERT_QUERY = TRIP_UPDATES_INSERT_QUERY
     TABLE_NAME = TRIP_UPDATE_TABLE
@@ -515,17 +521,19 @@ class TripUpdatesDataIngestion(DataIngestion):
             dict_str = base_dict.copy()
             arrival = get_field(stu, "arrival")
             departure = get_field(stu, "departure")
-            dict_str.update({
-                "stop_sequence": get_field(stu, "stop_sequence"),
-                "stop_id": get_field(stu, "stop_id"),
-                "schedule_relationship": get_field(stu, "schedule_relationship"),
-                "arrival_delay": get_field(arrival, "delay"),
-                "arrival_time": get_field(arrival, "time"),
-                "arrival_uncertainty": get_field(arrival, "uncertainty"),
-                "departure_delay": get_field(departure, "delay"),
-                "departure_time": get_field(departure, "time"),
-                "departure_uncertainty": get_field(departure, "uncertainty"),
-            })
+            dict_str.update(
+                {
+                    "stop_sequence": get_field(stu, "stop_sequence"),
+                    "stop_id": get_field(stu, "stop_id"),
+                    "schedule_relationship": get_field(stu, "schedule_relationship"),
+                    "arrival_delay": get_field(arrival, "delay"),
+                    "arrival_time": get_field(arrival, "time"),
+                    "arrival_uncertainty": get_field(arrival, "uncertainty"),
+                    "departure_delay": get_field(departure, "delay"),
+                    "departure_time": get_field(departure, "time"),
+                    "departure_uncertainty": get_field(departure, "uncertainty"),
+                }
+            )
             list_dicts.append(dict_str)
 
         return list_dicts
@@ -534,15 +542,19 @@ class TripUpdatesDataIngestion(DataIngestion):
     def _check_duplicate_entity(entity, latest_update) -> Tuple[bool, Dict]:
 
         check_cols = [
-            'arrival_delay', 'arrival_time', 'arrival_uncertainty',
-            'departure_delay', 'departure_time', 'departure_uncertainty'
+            "arrival_delay",
+            "arrival_time",
+            "arrival_uncertainty",
+            "departure_delay",
+            "departure_time",
+            "departure_uncertainty",
         ]
 
-        trip_id = entity.get('trip_id')
-        stop_id = entity.get('stop_id')
+        trip_id = entity.get("trip_id")
+        stop_id = entity.get("stop_id")
         cond = False
 
-         # If we don't have valid identifiers, we cannot reliably deduplicate.
+        # If we don't have valid identifiers, we cannot reliably deduplicate.
         if trip_id is None or stop_id is None:
             return cond, latest_update
 
@@ -558,29 +570,32 @@ class TripUpdatesDataIngestion(DataIngestion):
                     break
 
         if cond:
-            latest_update[trip_id][stop_id] = {
-                col: entity[col] for col in check_cols}
+            latest_update[trip_id][stop_id] = {col: entity[col] for col in check_cols}
         return cond, latest_update
 
     @staticmethod
     def _format_df_feed(df_feed: pd.DataFrame) -> pd.DataFrame:
-        df_feed['trip_start_timestamp'] = pd.to_datetime(
-            df_feed['trip_start_date'] + ' ' + df_feed['trip_start_time'],
-            format='%Y%m%d %H:%M:%S', errors='coerce'
+        df_feed["trip_start_timestamp"] = pd.to_datetime(
+            df_feed["trip_start_date"] + " " + df_feed["trip_start_time"],
+            format="%Y%m%d %H:%M:%S",
+            errors="coerce",
         )
 
-        process_cols = df_feed.dtypes[df_feed.dtypes == object]
+        process_cols = df_feed.dtypes[df_feed.dtypes == "object"]
         for col in process_cols.index:
-            df_feed[col] = df_feed[col].apply(lambda x: x if x != '' else None)
-        if 'trip_start_time' in df_feed.columns:
-            del df_feed['trip_start_time']
-        if 'trip_start_date' in df_feed.columns:
-            del df_feed['trip_start_date']
+            df_feed[col] = df_feed[col].apply(lambda x: x if x != "" else None)
+        if "trip_start_time" in df_feed.columns:
+            del df_feed["trip_start_time"]
+        if "trip_start_date" in df_feed.columns:
+            del df_feed["trip_start_date"]
 
         time_columns = ["feed_timestamp", "arrival_time", "departure_time"]
         for col in time_columns:
             df_feed[col] = df_feed[col].apply(
-                lambda x: pd.to_datetime(x, unit="s", errors='coerce') if x != 0 else None)
+                lambda x: (
+                    pd.to_datetime(x, unit="s", errors="coerce") if x != 0 else None
+                )
+            )
             df_feed[col] = df_feed[col].astype(object)
             df_feed[col] = df_feed[col].replace(pd.NaT, None)
 

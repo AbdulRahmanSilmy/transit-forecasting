@@ -1,26 +1,25 @@
 """
 Main script for ingesting GTFS-Realtime vehicle updates into MySQL database.
 
-This script fetches GTFS-Realtime data from a specified URL at regular 
-intervals, processes the data, and inserts it into a MySQL database table. 
+This script fetches GTFS-Realtime data from a specified URL at regular
+intervals, processes the data, and inserts it into a MySQL database table.
 It includes error handling and logging for monitoring the ingestion process.
 
-This script uses configuration parameters defined in a YAML file for database 
+This script uses configuration parameters defined in a YAML file for database
 connection and data ingestion settings.
 """
+
 import argparse
 import logging
 import threading
-from .config import (
-    CONFIG_PATH,
-    load_config,
-)
+
+from .config import CONFIG_PATH, load_config
 from .data_ingestion import (
     CONNECTION_PARAMS_KEY,
     DATA_INGESTION_PARAMS_KEY,
     LOGGING_FILE_KEY,
-    VehicleUpdatesDataIngestion,
     TripUpdatesDataIngestion,
+    VehicleUpdatesDataIngestion,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,19 +54,19 @@ def main(config_path: str = CONFIG_PATH):
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[
             logging.FileHandler(logging_file),  # log to file
-            logging.StreamHandler()  # also print to console
-        ]
+            logging.StreamHandler(),  # also print to console
+        ],
     )
     logger.info("Starting Data Ingestion")
 
     # Database connection
     vu_data_ingestion = VehicleUpdatesDataIngestion(
         connection_params=connection_params,
-        data_ingestion_params=vu_data_ingestion_params
+        data_ingestion_params=vu_data_ingestion_params,
     )
     tu_data_ingestion = TripUpdatesDataIngestion(
         connection_params=connection_params,
-        data_ingestion_params=tu_data_ingestion_params
+        data_ingestion_params=tu_data_ingestion_params,
     )
 
     # run ingestion loops concurrently
@@ -100,13 +99,12 @@ def main(config_path: str = CONFIG_PATH):
 
 if __name__ == "__main__":
     # get config path from command line args if provided
-    parser = argparse.ArgumentParser(
-        description="Run the data ingestion script.")
+    parser = argparse.ArgumentParser(description="Run the data ingestion script.")
     parser.add_argument(
         "--config",
         type=str,
         default=CONFIG_PATH,
-        help="Path to the configuration YAML file"
+        help="Path to the configuration YAML file",
     )
     args = parser.parse_args()
 
