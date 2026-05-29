@@ -1,10 +1,7 @@
-mysql-connector-python
-gtfs-realtime-bindings
-pandas
+-r data_ingestion/requirements.txt
 matplotlib
 notebook
 jupyterlab
-requests
 ipykernel
 geopandas
 plotly

@@ -19,6 +19,8 @@ Install Python dependencies:
 pip install -r requirements.txt
 ```
 
+The root requirements file includes the data ingestion requirements.
+
 Use `pytest` for tests.
 
 ### Pre-commit Hooks
