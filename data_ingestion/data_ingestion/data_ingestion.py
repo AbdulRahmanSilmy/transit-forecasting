@@ -30,7 +30,16 @@ logger = logging.getLogger(__name__)
 def fetch_gtfs_data(url: str) -> bytes | None:
     """
     Fetch GTFS real-time data from the given URL.
-    Returns None if the request fails or times out.
+
+    Parameters
+    ----------
+    url : str
+        The GTFS-Realtime feed URL to request.
+
+    Returns
+    -------
+    bytes or None
+        The raw feed bytes if the request is successful; otherwise ``None``.
     """
     try:
         response = requests.get(url, timeout=5)
@@ -47,7 +56,19 @@ def fetch_gtfs_data(url: str) -> bytes | None:
 
 
 def parse_gtfs_data(data: bytes):
-    """Parse GTFS real-time data from bytes into a FeedMessage."""
+    """
+    Parse GTFS real-time data from bytes into a protobuf FeedMessage.
+
+    Parameters
+    ----------
+    data : bytes
+        Raw GTFS-Realtime protobuf bytes as returned by the feed endpoint.
+
+    Returns
+    -------
+    google.transit.gtfs_realtime_pb2.FeedMessage
+        The parsed protobuf ``FeedMessage`` instance.
+    """
     # pylint: disable=no-member
     feed = gtfs_realtime_pb2.FeedMessage()
     # pylint: enable=no-member
@@ -56,6 +77,22 @@ def parse_gtfs_data(data: bytes):
 
 
 def get_field(obj, field):
+    """
+    Safely retrieve an attribute from an object, returning ``None`` if missing.
+
+    Parameters
+    ----------
+    obj : object
+        The object to access.
+
+    field : str
+        The attribute name to retrieve.
+
+    Returns
+    -------
+    Any
+        The attribute value if present; otherwise ``None``.
+    """
     return getattr(obj, field, None)
 
 
@@ -116,20 +153,61 @@ class DataIngestion(ABC):
     @staticmethod
     @abstractmethod
     def _get_dicts_from_feed(header, entity) -> List[dict]:
-        """Convert a feed entity into one or more dictionary rows."""
-        pass
+        """
+        Convert a feed entity into one or more dictionary rows.
+
+        Parameters
+        ----------
+        header : google.transit.gtfs_realtime_pb2.FeedHeader
+            The feed header object containing metadata for the feed.
+
+        entity : google.transit.gtfs_realtime_pb2.FeedEntity
+            The feed entity to convert into one or more row dictionaries.
+
+        Returns
+        -------
+        list[dict]
+            One or more dictionaries representing flattened rows extracted from the entity.
+        """
 
     @staticmethod
     @abstractmethod
     def _check_duplicate_entity(entity, latest_update) -> Tuple[bool, Dict]:
-        """Return whether an entity should be ingested and update duplicate tracking."""
-        pass
+        """
+        Determine whether an entity is a duplicate and update tracking state.
+
+        Parameters
+        ----------
+        entity : dict
+            The candidate entity dictionary extracted from the feed.
+
+        latest_update : dict
+            The current duplicate-tracking state for previously seen entities.
+
+        Returns
+        -------
+        (bool, dict)
+            Tuple where the first element is True if the entity should be ingested
+            (i.e., is not a duplicate), and the second element is the updated
+            `latest_update` tracking structure.
+        """
 
     @staticmethod
     @abstractmethod
     def _format_df_feed(df_feed: pd.DataFrame) -> pd.DataFrame:
-        """Normalize the raw feed DataFrame into database-ready types."""
-        pass
+        """
+        Normalize the raw feed DataFrame into database-ready types.
+
+        Parameters
+        ----------
+        df_feed : pandas.DataFrame
+            Raw DataFrame created from flattened feed dictionaries.
+
+        Returns
+        -------
+        pandas.DataFrame
+            A transformed DataFrame with properly-typed columns ready for DB insert.
+        """
 
     @staticmethod
     def _to_python_datetime(value, unit=None):
@@ -172,7 +250,7 @@ class DataIngestion(ABC):
 
         Returns
         -------
-        List[dict]
+        list[dict]
             A list of dictionary representations of the FeedEntities.
         """
         header = get_field(feed, cons.HEADER_KEY)
@@ -185,7 +263,7 @@ class DataIngestion(ABC):
 
     def _get_df_feed(
         self, list_dict_entities: List[dict], latest_updates: dict
-    ) -> pd.DataFrame:
+    ) -> Tuple[pd.DataFrame, dict]:
         """
         Convert a list of dictionary representations of FeedEntities to a DataFrame.
 
@@ -232,6 +310,11 @@ class DataIngestion(ABC):
     def _get_sql_connection(self, stop_event: threading.Event) -> tuple:
         """
         Establishes a connection to the MySQL database with retry logic.
+
+        Parameters
+        ----------
+        stop_event : threading.Event
+            Event used to signal shutdown; connection attempts stop if set.
 
         Returns
         -------
@@ -323,9 +406,21 @@ class DataIngestion(ABC):
 
     def run_ingestion_loop(self, stop_event: threading.Event):
         """
-        Starts the continuous data ingestion loop. Continually fetches data
-        from the GTFS-Realtime feed, processes it, and inserts it into the
-        MySQL database.
+        Starts the continuous data ingestion loop.
+
+        The loop repeatedly fetches the GTFS-Realtime feed, processes the data,
+        and inserts new rows into the configured MySQL table until
+        `stop_event` is set.
+
+        Parameters
+        ----------
+        stop_event : threading.Event
+            Event used to signal shutdown of the ingestion loop.
+
+        Returns
+        -------
+        None
+            Runs until `stop_event` is set; performs work via side-effects.
         """
         conn = None
         cur = None
@@ -404,7 +499,7 @@ class VehicleUpdatesDataIngestion(DataIngestion):
 
         Returns
         -------
-        List[Dict]
+        list[dict]
             A list of dictionary representations of the FeedEntity.
         """
         vehicle = get_field(entity, cons.VEHICLE_KEY)
@@ -445,7 +540,25 @@ class VehicleUpdatesDataIngestion(DataIngestion):
 
     @staticmethod
     def _check_duplicate_entity(entity, latest_update) -> Tuple[bool, Dict]:
-        """Return whether the vehicle update is newer than the last seen record."""
+        """
+        Return whether the vehicle update is newer than the last seen record.
+
+        Parameters
+        ----------
+        entity : dict
+            Flattened vehicle entity dictionary.
+
+        latest_update : dict
+            Current tracking state for latest vehicle timestamps.
+
+        Returns
+        -------
+        cond : bool
+            True if the entity is not a duplicate and should be ingested; False otherwise.
+        updated_latest_update : dict
+            Updated tracking state for latest vehicle timestamps, with the current entity's
+            timestamp included if it is newer than the existing record for that vehicle.
+        """
         vehicle_id = entity.get(cons.VEHICLE_ID_KEY)
 
         if vehicle_id is None:
@@ -464,7 +577,19 @@ class VehicleUpdatesDataIngestion(DataIngestion):
 
     @staticmethod
     def _format_df_feed(df_feed: pd.DataFrame) -> pd.DataFrame:
-        """Convert vehicle-update feed fields to database-ready values."""
+        """
+        Convert vehicle-update feed fields to database-ready values.
+
+        Parameters
+        ----------
+        df_feed : pandas.DataFrame
+            DataFrame created from flattened vehicle feed dictionaries.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Transformed DataFrame ready for DB insertion.
+        """
 
         df_feed[cons.TRIP_START_TIMESTAMP_KEY] = pd.to_datetime(
             df_feed[cons.TRIP_START_DATE_KEY] + " " + df_feed[cons.TRIP_START_TIME_KEY],
@@ -557,7 +682,7 @@ class TripUpdatesDataIngestion(DataIngestion):
 
         Returns
         -------
-        list[Dict]
+        list[dict]
             A list of dictionary representations of the FeedEntity.
         """
         trip_update = get_field(entity, cons.TRIP_UPDATE_KEY)
@@ -606,7 +731,25 @@ class TripUpdatesDataIngestion(DataIngestion):
 
     @staticmethod
     def _check_duplicate_entity(entity, latest_update) -> Tuple[bool, Dict]:
-        """Return whether the trip update contains a changed stop-time snapshot."""
+        """
+        Return whether the trip update contains a changed stop-time snapshot.
+
+        Parameters
+        ----------
+        entity : dict
+            Flattened trip update dictionary.
+
+        latest_update : dict
+            Tracking structure for previous trip stop-time snapshots.
+
+        Returns
+        -------
+        cond : bool
+            True if the entity is not a duplicate and should be ingested; False otherwise.
+        updated_latest_update : dict
+            Updated tracking state for latest trip stop-time snapshots, with the current entity's
+            snapshot included if it is newer than the existing record for that trip/stop.
+        """
 
         check_cols = [
             cons.ARRIVAL_DELAY_KEY,
@@ -642,7 +785,19 @@ class TripUpdatesDataIngestion(DataIngestion):
 
     @staticmethod
     def _format_df_feed(df_feed: pd.DataFrame) -> pd.DataFrame:
-        """Convert trip-update feed fields to database-ready values."""
+        """
+        Convert trip-update feed fields to database-ready values.
+
+        Parameters
+        ----------
+        df_feed : pandas.DataFrame
+            DataFrame created from flattened trip-update feed dictionaries.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Transformed DataFrame ready for DB insertion.
+        """
         df_feed[cons.TRIP_START_TIMESTAMP_KEY] = pd.to_datetime(
             df_feed[cons.TRIP_START_DATE_KEY] + " " + df_feed[cons.TRIP_START_TIME_KEY],
             format=cons.TRIP_START_TIMESTAMP_FORMAT,
