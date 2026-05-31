@@ -13,10 +13,9 @@ from .constants import (
     LOGGING_FILE_KEY,
     REQUIRED_CONNECTION_KEYS,
     REQUIRED_INGESTION_KEYS,
+    TRIP_UPDATES_KEY,
+    VEHICLE_UPDATES_KEY,
 )
-
-VEHICLE_UPDATES_KEY = "vehicle_updates"
-TRIP_UPDATES_KEY = "trip_updates"
 
 
 class ConfigError(ValueError):

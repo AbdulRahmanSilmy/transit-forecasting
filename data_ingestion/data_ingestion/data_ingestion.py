@@ -318,7 +318,7 @@ class VehicleUpdatesDataIngestion(DataIngestion):
 
     CREATE_TABLE_QUERY = sql_queries.VEHICLE_UPDATES_CREATE_TABLE_QUERY
     INSERT_QUERY = sql_queries.VEHICLE_UPDATES_INSERT_QUERY
-    TABLE_NAME = sql_queries.VEHICLE_UPDATE_TABLE
+    TABLE_NAME = cons.VEHICLE_UPDATE_TABLE
 
     @staticmethod
     def _get_dicts_from_feed(header, entity) -> List[Dict]:
@@ -396,14 +396,14 @@ class VehicleUpdatesDataIngestion(DataIngestion):
     def _format_df_feed(df_feed: pd.DataFrame) -> pd.DataFrame:
         df_feed[cons.TRIP_START_TIMESTAMP_KEY] = pd.to_datetime(
             df_feed[cons.TRIP_START_DATE_KEY] + " " + df_feed[cons.TRIP_START_TIME_KEY],
-            format="%Y%m%d %H:%M:%S",
+            format=cons.TRIP_START_TIMESTAMP_FORMAT,
             errors="coerce",
         )
         df_feed[cons.FEED_TIMESTAMP_KEY] = pd.to_datetime(
-            df_feed[cons.FEED_TIMESTAMP_KEY], unit="s"
+            df_feed[cons.FEED_TIMESTAMP_KEY], unit=cons.UNIX_TIMESTAMP_UNIT
         )
         df_feed[cons.TIMESTAMP_KEY] = pd.to_datetime(
-            df_feed[cons.TIMESTAMP_KEY], unit="s"
+            df_feed[cons.TIMESTAMP_KEY], unit=cons.UNIX_TIMESTAMP_UNIT
         )
 
         process_cols = df_feed.dtypes[df_feed.dtypes == "object"]
@@ -464,7 +464,7 @@ class TripUpdatesDataIngestion(DataIngestion):
 
     CREATE_TABLE_QUERY = sql_queries.TRIP_UPDATES_CREATE_TABLE_QUERY
     INSERT_QUERY = sql_queries.TRIP_UPDATES_INSERT_QUERY
-    TABLE_NAME = sql_queries.TRIP_UPDATE_TABLE
+    TABLE_NAME = cons.TRIP_UPDATE_TABLE
 
     @staticmethod
     def _get_dicts_from_feed(header, entity) -> List[Dict]:
@@ -532,12 +532,12 @@ class TripUpdatesDataIngestion(DataIngestion):
     def _check_duplicate_entity(entity, latest_update) -> Tuple[bool, Dict]:
 
         check_cols = [
-            "arrival_delay",
-            "arrival_time",
-            "arrival_uncertainty",
-            "departure_delay",
-            "departure_time",
-            "departure_uncertainty",
+            cons.ARRIVAL_DELAY_KEY,
+            cons.ARRIVAL_TIME_KEY,
+            cons.ARRIVAL_UNCERTAINTY_KEY,
+            cons.DEPARTURE_DELAY_KEY,
+            cons.DEPARTURE_TIME_KEY,
+            cons.DEPARTURE_UNCERTAINTY_KEY,
         ]
 
         trip_id = entity.get(cons.TRIP_ID_KEY)
@@ -567,7 +567,7 @@ class TripUpdatesDataIngestion(DataIngestion):
     def _format_df_feed(df_feed: pd.DataFrame) -> pd.DataFrame:
         df_feed[cons.TRIP_START_TIMESTAMP_KEY] = pd.to_datetime(
             df_feed[cons.TRIP_START_DATE_KEY] + " " + df_feed[cons.TRIP_START_TIME_KEY],
-            format="%Y%m%d %H:%M:%S",
+            format=cons.TRIP_START_TIMESTAMP_FORMAT,
             errors="coerce",
         )
 
@@ -587,7 +587,9 @@ class TripUpdatesDataIngestion(DataIngestion):
         for col in time_columns:
             df_feed[col] = df_feed[col].apply(
                 lambda x: (
-                    pd.to_datetime(x, unit="s", errors="coerce") if x != 0 else None
+                    pd.to_datetime(x, unit=cons.UNIX_TIMESTAMP_UNIT, errors="coerce")
+                    if x != 0
+                    else None
                 )
             )
             df_feed[col] = df_feed[col].astype(object)

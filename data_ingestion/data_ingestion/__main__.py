@@ -18,6 +18,8 @@ from .constants import (
     CONNECTION_PARAMS_KEY,
     DATA_INGESTION_PARAMS_KEY,
     LOGGING_FILE_KEY,
+    TRIP_UPDATES_KEY,
+    VEHICLE_UPDATES_KEY,
 )
 from .data_ingestion import TripUpdatesDataIngestion, VehicleUpdatesDataIngestion
 
@@ -39,10 +41,10 @@ def main(config_path: str = CONFIG_PATH):
 
     connection_params = config.get(CONNECTION_PARAMS_KEY, {})
 
-    vu_config = config.get("vehicle_updates")
+    vu_config = config.get(VEHICLE_UPDATES_KEY)
     vu_data_ingestion_params = dict(**vu_config[DATA_INGESTION_PARAMS_KEY])
 
-    tu_config = config.get("trip_updates")
+    tu_config = config.get(TRIP_UPDATES_KEY)
     tu_data_ingestion_params = dict(**tu_config[DATA_INGESTION_PARAMS_KEY])
 
     logging_file = config[LOGGING_FILE_KEY]
