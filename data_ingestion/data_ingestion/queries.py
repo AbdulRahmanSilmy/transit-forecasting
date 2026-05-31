@@ -1,89 +1,69 @@
 """
-SQL queries for creating table and inserting data into the database.
+SQL query templates loaded from external SQL files.
 
-TODO:
-- Move these queries to actual sql files and load them as needed.
+This module loads SQL templates from the ``sql/`` directory and formats them
+using uppercase constants exported by :mod:`data_ingestion.data_ingestion.constants`.
+
+Notes
+-----
+The SQL templates are plain text files containing placeholder names that are
+substituted via ``str.format`` using the values of uppercase constants from
+``constants.py``. This keeps SQL separate from Python code for readability
+and easier editing.
 """
+
+from importlib.resources import files
 
 from . import constants as cons
 
-VEHICLE_UPDATE_TABLE = cons.VEHICLE_UPDATE_TABLE
-TRIP_UPDATE_TABLE = cons.TRIP_UPDATE_TABLE
 
-VEHICLE_UPDATES_CREATE_TABLE_QUERY = f"""
-CREATE TABLE IF NOT EXISTS {cons.VEHICLE_UPDATE_TABLE} (
-    {cons.ID_KEY} INT AUTO_INCREMENT PRIMARY KEY,
-    {cons.FEED_TIMESTAMP_KEY} TIMESTAMP,
-    {cons.ENTITY_ID_KEY} INT,
-    {cons.TRIP_ID_KEY} VARCHAR(50),
-    {cons.TRIP_SCHEDULE_RELATIONSHIP_KEY} INT,
-    {cons.TRIP_ROUTE_ID_KEY} VARCHAR(20),
-    {cons.TRIP_DIRECTION_ID_KEY} INT,
-    {cons.POSITION_LATITUDE_KEY} DOUBLE,
-    {cons.POSITION_LONGITUDE_KEY} DOUBLE,
-    {cons.POSITION_BEARING_KEY} DOUBLE,
-    {cons.POSITION_ODOMETER_KEY} DOUBLE,
-    {cons.POSITION_SPEED_KEY} DOUBLE,
-    {cons.CURRENT_STOP_SEQUENCE_KEY} INT,
-    {cons.CURRENT_STATUS_KEY} INT,
-    {cons.TIMESTAMP_KEY} TIMESTAMP,
-    {cons.CONGESTION_LEVEL_KEY} INT,
-    {cons.STOP_ID_KEY} VARCHAR(50),
-    {cons.VEHICLE_ID_KEY} VARCHAR(50),
-    {cons.VEHICLE_LABEL_KEY} VARCHAR(50),
-    {cons.TRIP_START_TIMESTAMP_KEY} TIMESTAMP,
-    {cons.READ_TIMESTAMP_KEY} TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
+def _cons_map() -> dict:
+    """
+    Build a mapping of uppercase constant names to their values.
 
-VEHICLE_UPDATES_INSERT_QUERY = f"""
-INSERT INTO {cons.VEHICLE_UPDATE_TABLE} (
-    {cons.FEED_TIMESTAMP_KEY}, {cons.ENTITY_ID_KEY}, {cons.TRIP_ID_KEY}, {cons.TRIP_SCHEDULE_RELATIONSHIP_KEY},
-    {cons.TRIP_ROUTE_ID_KEY}, {cons.TRIP_DIRECTION_ID_KEY}, {cons.POSITION_LATITUDE_KEY}, {cons.POSITION_LONGITUDE_KEY},
-    {cons.POSITION_BEARING_KEY}, {cons.POSITION_ODOMETER_KEY}, {cons.POSITION_SPEED_KEY}, {cons.CURRENT_STOP_SEQUENCE_KEY},
-    {cons.CURRENT_STATUS_KEY}, {cons.TIMESTAMP_KEY}, {cons.CONGESTION_LEVEL_KEY}, {cons.STOP_ID_KEY}, {cons.VEHICLE_ID_KEY},
-    {cons.VEHICLE_LABEL_KEY}, {cons.TRIP_START_TIMESTAMP_KEY}
-)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-"""
+    The returned mapping is intended for use with ``str.format`` on SQL
+    templates stored in the ``sql/`` directory. Only attributes on
+    :mod:`data_ingestion.data_ingestion.constants` whose names are all
+    uppercase are included.
 
-TRIP_UPDATES_CREATE_TABLE_QUERY = f"""
-CREATE TABLE IF NOT EXISTS {cons.TRIP_UPDATE_TABLE} (
-    {cons.ID_KEY} INT AUTO_INCREMENT PRIMARY KEY,
-    {cons.FEED_TIMESTAMP_KEY} TIMESTAMP,
-    {cons.TRIP_ID_KEY} VARCHAR(50),
-    {cons.TRIP_SCHEDULE_RELATIONSHIP_KEY} INT,
-    {cons.TRIP_ROUTE_ID_KEY} VARCHAR(20),
-    {cons.TRIP_DIRECTION_ID_KEY} INT,
-    {cons.STOP_SEQUENCE_KEY} INT,
-    {cons.STOP_ID_KEY} VARCHAR(50),
-    {cons.SCHEDULE_RELATIONSHIP_KEY} INT,
-    {cons.ARRIVAL_DELAY_KEY} INT,
-    {cons.ARRIVAL_TIME_KEY} TIMESTAMP,
-    {cons.ARRIVAL_UNCERTAINTY_KEY} INT,
-    {cons.DEPARTURE_DELAY_KEY} INT,
-    {cons.DEPARTURE_TIME_KEY} TIMESTAMP,
-    {cons.DEPARTURE_UNCERTAINTY_KEY} INT,
-    {cons.TRIP_START_TIMESTAMP_KEY} TIMESTAMP
-);
-"""
+    Returns
+    -------
+    dict
+        Mapping from uppercase constant name (str) to its value (Any).
+    """
 
-TRIP_UPDATES_INSERT_QUERY = f"""
-INSERT INTO {cons.TRIP_UPDATE_TABLE} (
-    {cons.FEED_TIMESTAMP_KEY},
-    {cons.TRIP_ID_KEY},
-    {cons.TRIP_SCHEDULE_RELATIONSHIP_KEY},
-    {cons.TRIP_ROUTE_ID_KEY},
-    {cons.TRIP_DIRECTION_ID_KEY},
-    {cons.STOP_SEQUENCE_KEY},
-    {cons.STOP_ID_KEY},
-    {cons.SCHEDULE_RELATIONSHIP_KEY},
-    {cons.ARRIVAL_DELAY_KEY},
-    {cons.ARRIVAL_TIME_KEY},
-    {cons.ARRIVAL_UNCERTAINTY_KEY},
-    {cons.DEPARTURE_DELAY_KEY},
-    {cons.DEPARTURE_TIME_KEY},
-    {cons.DEPARTURE_UNCERTAINTY_KEY},
-    {cons.TRIP_START_TIMESTAMP_KEY}
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-"""
+    return {k: v for k, v in cons.__dict__.items() if k.isupper()}
+
+
+def _load_and_format(filename: str) -> str:
+    """
+    Load a SQL template file and format it with constants.
+
+    Parameters
+    ----------
+    filename : str
+        The name of the SQL template file (relative to the package ``sql/``
+        directory) to load and format.
+
+    Returns
+    -------
+    str
+        The SQL string with placeholders substituted using uppercase
+        constants from :mod:`data_ingestion.data_ingestion.constants`.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the specified template file does not exist in the ``sql/``
+        directory.
+    """
+
+    txt = files(__package__).joinpath("sql", filename).read_text()
+    return txt.format(**_cons_map())
+
+
+VEHICLE_UPDATES_CREATE_TABLE_QUERY = _load_and_format("vehicle_updates_create.sql")
+VEHICLE_UPDATES_INSERT_QUERY = _load_and_format("vehicle_updates_insert.sql")
+
+TRIP_UPDATES_CREATE_TABLE_QUERY = _load_and_format("trip_updates_create.sql")
+TRIP_UPDATES_INSERT_QUERY = _load_and_format("trip_updates_insert.sql")
