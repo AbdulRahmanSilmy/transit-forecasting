@@ -17,12 +17,46 @@ from typing import Dict, List, Tuple
 
 import mysql.connector
 import pandas as pd
+import requests
+from google.transit import gtfs_realtime_pb2
+from requests.exceptions import Timeout
 
 from . import constants as cons
 from . import queries as sql_queries
-from .utils import fetch_gtfs_data, get_field, parse_gtfs_data
 
 logger = logging.getLogger(__name__)
+
+
+def fetch_gtfs_data(url: str) -> bytes | None:
+    """
+    Fetch GTFS real-time data from the given URL.
+    Returns None if the request fails or times out.
+    """
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        return response.content
+    except (Timeout, requests.exceptions.ConnectionError):
+        logger.exception("Network error or timeout occurred while fetching GTFS data.")
+    except requests.exceptions.HTTPError as e:
+        logger.exception("HTTP error while fetching GTFS data: %s", e)
+    except requests.exceptions.RequestException as e:
+        logger.exception("Unexpected error while fetching GTFS data: %s", e)
+
+    return None
+
+
+def parse_gtfs_data(data: bytes):
+    """Parse GTFS real-time data from bytes into a FeedMessage."""
+    # pylint: disable=no-member
+    feed = gtfs_realtime_pb2.FeedMessage()
+    # pylint: enable=no-member
+    feed.ParseFromString(data)
+    return feed
+
+
+def get_field(obj, field):
+    return getattr(obj, field, None)
 
 
 class DataIngestion(ABC):
