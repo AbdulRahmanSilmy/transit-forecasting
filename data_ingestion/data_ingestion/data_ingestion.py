@@ -56,6 +56,7 @@ class DataIngestion(ABC):
     TABLE_NAME: str = None
 
     def __init_subclass__(cls):
+        """Require concrete subclasses to define SQL and table metadata."""
         super().__init_subclass__()
         if cls.CREATE_TABLE_QUERY is None:
             raise TypeError(f"{cls.__name__} must define 'CREATE_TABLE_QUERY'")
@@ -65,6 +66,7 @@ class DataIngestion(ABC):
             raise TypeError(f"{cls.__name__} must define 'TABLE_NAME'")
 
     def __init__(self, connection_params: dict, data_ingestion_params: dict):
+        """Store configuration and validate the required ingestion parameters."""
         self.connection_params = connection_params
         self.data_ingestion_params = data_ingestion_params
         self._latest_update = {}
@@ -80,17 +82,50 @@ class DataIngestion(ABC):
     @staticmethod
     @abstractmethod
     def _get_dicts_from_feed(header, entity) -> List[dict]:
+        """Convert a feed entity into one or more dictionary rows."""
         pass
 
     @staticmethod
     @abstractmethod
     def _check_duplicate_entity(entity, latest_update) -> Tuple[bool, Dict]:
+        """Return whether an entity should be ingested and update duplicate tracking."""
         pass
 
     @staticmethod
     @abstractmethod
     def _format_df_feed(df_feed: pd.DataFrame) -> pd.DataFrame:
+        """Normalize the raw feed DataFrame into database-ready types."""
         pass
+
+    @staticmethod
+    def _to_python_datetime(value, unit=None):
+        """Convert a pandas-compatible datetime value into a MySQL-safe Python datetime."""
+        if value is None or pd.isna(value) or value == 0:
+            return None
+
+        parsed_value = pd.to_datetime(value, unit=unit, errors="coerce")
+        if pd.isna(parsed_value):
+            return None
+
+        # Reject datetimes outside MySQL's supported range (year >= 1000)
+        # Pandas may parse strings like '0001-01-01' which Python returns
+        # as year 1 — MySQL will reject those, so treat them as missing.
+        year = getattr(parsed_value, "year", None)
+        if year is None:
+            return None
+        if year < 1000:
+            return None
+
+        return parsed_value.to_pydatetime()
+
+    @staticmethod
+    def _normalize_datetime_series(series: pd.Series, unit=None) -> pd.Series:
+        """Normalize a Series of datetimes to object dtype while preserving None values."""
+        return pd.Series(
+            [DataIngestion._to_python_datetime(value, unit=unit) for value in series],
+            index=series.index,
+            dtype=object,
+        )
 
     def _extract_feed_info(self, feed) -> List[Dict]:
         """
@@ -376,6 +411,7 @@ class VehicleUpdatesDataIngestion(DataIngestion):
 
     @staticmethod
     def _check_duplicate_entity(entity, latest_update) -> Tuple[bool, Dict]:
+        """Return whether the vehicle update is newer than the last seen record."""
         vehicle_id = entity.get(cons.VEHICLE_ID_KEY)
 
         if vehicle_id is None:
@@ -394,16 +430,12 @@ class VehicleUpdatesDataIngestion(DataIngestion):
 
     @staticmethod
     def _format_df_feed(df_feed: pd.DataFrame) -> pd.DataFrame:
+        """Convert vehicle-update feed fields to database-ready values."""
+
         df_feed[cons.TRIP_START_TIMESTAMP_KEY] = pd.to_datetime(
             df_feed[cons.TRIP_START_DATE_KEY] + " " + df_feed[cons.TRIP_START_TIME_KEY],
             format=cons.TRIP_START_TIMESTAMP_FORMAT,
             errors="coerce",
-        )
-        df_feed[cons.FEED_TIMESTAMP_KEY] = pd.to_datetime(
-            df_feed[cons.FEED_TIMESTAMP_KEY], unit=cons.UNIX_TIMESTAMP_UNIT
-        )
-        df_feed[cons.TIMESTAMP_KEY] = pd.to_datetime(
-            df_feed[cons.TIMESTAMP_KEY], unit=cons.UNIX_TIMESTAMP_UNIT
         )
 
         process_cols = df_feed.dtypes[df_feed.dtypes == "object"]
@@ -434,6 +466,16 @@ class VehicleUpdatesDataIngestion(DataIngestion):
         for col, col_type in col_types.items():
             if col in df_feed.columns:
                 df_feed[col] = df_feed[col].astype(col_type)
+
+        time_columns = [
+            cons.FEED_TIMESTAMP_KEY,
+            cons.TIMESTAMP_KEY,
+            cons.TRIP_START_TIMESTAMP_KEY,
+        ]
+        for col in time_columns:
+            df_feed[col] = DataIngestion._normalize_datetime_series(
+                df_feed[col], unit=cons.UNIX_TIMESTAMP_UNIT
+            )
 
         # drop cols with No trip start timestamp
         df_feed = df_feed[~df_feed[cons.TRIP_START_TIMESTAMP_KEY].isna()].reset_index(
@@ -530,6 +572,7 @@ class TripUpdatesDataIngestion(DataIngestion):
 
     @staticmethod
     def _check_duplicate_entity(entity, latest_update) -> Tuple[bool, Dict]:
+        """Return whether the trip update contains a changed stop-time snapshot."""
 
         check_cols = [
             cons.ARRIVAL_DELAY_KEY,
@@ -565,6 +608,7 @@ class TripUpdatesDataIngestion(DataIngestion):
 
     @staticmethod
     def _format_df_feed(df_feed: pd.DataFrame) -> pd.DataFrame:
+        """Convert trip-update feed fields to database-ready values."""
         df_feed[cons.TRIP_START_TIMESTAMP_KEY] = pd.to_datetime(
             df_feed[cons.TRIP_START_DATE_KEY] + " " + df_feed[cons.TRIP_START_TIME_KEY],
             format=cons.TRIP_START_TIMESTAMP_FORMAT,
@@ -583,16 +627,11 @@ class TripUpdatesDataIngestion(DataIngestion):
             cons.FEED_TIMESTAMP_KEY,
             cons.ARRIVAL_TIME_KEY,
             cons.DEPARTURE_TIME_KEY,
+            cons.TRIP_START_TIMESTAMP_KEY,
         ]
         for col in time_columns:
-            df_feed[col] = df_feed[col].apply(
-                lambda x: (
-                    pd.to_datetime(x, unit=cons.UNIX_TIMESTAMP_UNIT, errors="coerce")
-                    if x != 0
-                    else None
-                )
+            df_feed[col] = DataIngestion._normalize_datetime_series(
+                df_feed[col], unit=cons.UNIX_TIMESTAMP_UNIT
             )
-            df_feed[col] = df_feed[col].astype(object)
-            df_feed[col] = df_feed[col].replace(pd.NaT, None)
 
         return df_feed
