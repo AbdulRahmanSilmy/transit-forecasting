@@ -26,6 +26,10 @@ from . import queries as sql_queries
 
 logger = logging.getLogger(__name__)
 
+# Protobuf generated modules expose attributes that static linters may not
+# understand. We apply a single-line disable at the use site instead of a
+# module-level suppression.
+
 
 def fetch_gtfs_data(url: str) -> bytes | None:
     """
@@ -69,9 +73,7 @@ def parse_gtfs_data(data: bytes):
     google.transit.gtfs_realtime_pb2.FeedMessage
         The parsed protobuf ``FeedMessage`` instance.
     """
-    # pylint: disable=no-member
-    feed = gtfs_realtime_pb2.FeedMessage()
-    # pylint: enable=no-member
+    feed = gtfs_realtime_pb2.FeedMessage()  # pylint: disable=no-member
     feed.ParseFromString(data)
     return feed
 
@@ -447,8 +449,7 @@ class DataIngestion(ABC):
                     if conn is None or cur is None:
                         return
 
-                # pylint: disable=broad-except
-                except Exception:
+                except Exception:  # pylint: disable=broad-except
                     logger.exception("%s: Unexpected error.", self.TABLE_NAME)
 
                 # Sleep between feed fetches (adjust to feed update interval)
