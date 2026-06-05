@@ -5,10 +5,16 @@ connection_params:
   database: "transitdb"
   port: 3306
 
-data_ingestion_params:
-  ingestion_url: "https://bct.tmix.se/gtfs-realtime/vehicleupdates.pb?operatorIds=47"
-  fetch_delay_seconds: 5
-  connection_retry_delay_seconds: 10
+vehicle_updates:
+  data_ingestion_params:
+    ingestion_url: "https://bct.tmix.se/gtfs-realtime/vehicleupdates.pb?operatorIds=47"
+    fetch_delay_seconds: 5
+    connection_retry_delay_seconds: 10
+
+trip_updates:
+  data_ingestion_params:
+    ingestion_url: "https://bct.tmix.se/gtfs-realtime/tripupdates.pb?operatorIds=47"
+    fetch_delay_seconds: 5
+    connection_retry_delay_seconds: 10
 
 logging_file: "data_ingestion.log"
-
