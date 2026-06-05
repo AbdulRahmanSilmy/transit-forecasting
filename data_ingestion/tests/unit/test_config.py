@@ -22,6 +22,8 @@ from data_ingestion.constants import (
     VEHICLE_UPDATES_KEY,
 )
 
+# pylint: disable=no-member,missing-docstring,protected-access
+
 
 def _base_config() -> dict:
     return {

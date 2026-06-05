@@ -3,6 +3,8 @@ from __future__ import annotations
 from data_ingestion import constants as cons
 from data_ingestion import data_ingestion as di
 
+# pylint: disable=no-member,missing-docstring,protected-access
+
 
 def test_vehicle_update_duplicate_detection():
     latest = {}

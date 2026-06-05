@@ -5,6 +5,8 @@ from google.transit import gtfs_realtime_pb2
 
 from data_ingestion import data_ingestion as di
 
+# pylint: disable=no-member,missing-docstring,protected-access
+
 
 def test_fetch_gtfs_data_success(monkeypatch):
     class FakeResponse:

@@ -5,6 +5,8 @@ import pandas as pd
 from data_ingestion import constants as cons
 from data_ingestion import data_ingestion as di
 
+# pylint: disable=no-member,missing-docstring,protected-access
+
 
 def _ingestion():
     return di.VehicleUpdatesDataIngestion(
