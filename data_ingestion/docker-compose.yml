@@ -2,6 +2,7 @@ services:
   mysql:
     image: mysql:8.0
     container_name: transit_mysql
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: root123
       MYSQL_DATABASE: transitdb
@@ -22,6 +23,7 @@ services:
   phpmyadmin:
     image: phpmyadmin/phpmyadmin
     container_name: phpmyadmin
+    restart: unless-stopped
     environment:
       PMA_HOST: mysql
       PMA_USER: root
@@ -35,6 +37,7 @@ services:
   data_ingestion:
     build: .
     container_name: data_ingestion
+    restart: unless-stopped
     depends_on:
       mysql:
         condition: service_healthy
