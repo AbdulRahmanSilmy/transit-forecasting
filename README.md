@@ -32,3 +32,13 @@ pre-commit install
 
 ## Data Ingestion
 The ingestion scripts live under [data_ingestion/](data_ingestion) and use [data_ingestion/config.yaml.example](data_ingestion/config.yaml.example) for configuration.
+
+### Docker
+The Docker Compose file is in [data_ingestion/docker-compose.yml](data_ingestion/docker-compose.yml). Run it from the `data_ingestion` directory:
+
+```bash
+cd data_ingestion
+docker compose up --build
+```
+
+This starts MySQL, phpMyAdmin, and the data ingestion service.
