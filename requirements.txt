@@ -1,4 +1,4 @@
--r data_ingestion/requirements.txt
+-e data_ingestion
 matplotlib
 notebook
 jupyterlab
