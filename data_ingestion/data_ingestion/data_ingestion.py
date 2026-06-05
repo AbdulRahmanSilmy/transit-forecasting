@@ -138,10 +138,16 @@ class DataIngestion(ABC):
         if cls.TABLE_NAME is None:
             raise TypeError(f"{cls.__name__} must define 'TABLE_NAME'")
 
-    def __init__(self, connection_params: dict, data_ingestion_params: dict):
+    def __init__(
+        self,
+        connection_params: dict,
+        data_ingestion_params: dict,
+        time_columns: List[str],
+    ):
         """Store configuration and validate the required ingestion parameters."""
         self.connection_params = connection_params
         self.data_ingestion_params = data_ingestion_params
+        self._time_columns = time_columns
         self._latest_update = {}
 
         self._check_parameters()
@@ -194,9 +200,7 @@ class DataIngestion(ABC):
             `latest_update` tracking structure.
         """
 
-    @staticmethod
-    @abstractmethod
-    def _format_df_feed(df_feed: pd.DataFrame) -> pd.DataFrame:
+    def _format_df_feed(self, df_feed: pd.DataFrame) -> pd.DataFrame:
         """
         Normalize the raw feed DataFrame into database-ready types.
 
@@ -210,6 +214,34 @@ class DataIngestion(ABC):
         pandas.DataFrame
             A transformed DataFrame with properly-typed columns ready for DB insert.
         """
+        if (
+            cons.TRIP_START_TIME_KEY in df_feed.columns
+            and cons.TRIP_START_DATE_KEY in df_feed.columns
+        ):
+            df_feed[cons.TRIP_START_TIMESTAMP_KEY] = pd.to_datetime(
+                df_feed[cons.TRIP_START_DATE_KEY]
+                + " "
+                + df_feed[cons.TRIP_START_TIME_KEY],
+                format=cons.TRIP_START_TIMESTAMP_FORMAT,
+                errors="coerce",
+            )
+
+        process_cols = df_feed.dtypes[df_feed.dtypes == "object"]
+        for col in process_cols.index:
+            df_feed[col] = df_feed[col].apply(lambda x: x if x != "" else None)
+
+        if cons.TRIP_START_TIME_KEY in df_feed.columns:
+            del df_feed[cons.TRIP_START_TIME_KEY]
+        if cons.TRIP_START_DATE_KEY in df_feed.columns:
+            del df_feed[cons.TRIP_START_DATE_KEY]
+
+        for col in self._time_columns:
+            if col in df_feed.columns:
+                df_feed[col] = DataIngestion._normalize_datetime_series(
+                    df_feed[col], unit=cons.UNIX_TIMESTAMP_UNIT
+                )
+
+        return df_feed
 
     @staticmethod
     def _to_python_datetime(value, unit=None):
@@ -485,6 +517,17 @@ class VehicleUpdatesDataIngestion(DataIngestion):
     INSERT_QUERY = sql_queries.VEHICLE_UPDATES_INSERT_QUERY
     TABLE_NAME = cons.VEHICLE_UPDATE_TABLE
 
+    def __init__(self, connection_params: dict, data_ingestion_params: dict):
+        super().__init__(
+            connection_params=connection_params,
+            data_ingestion_params=data_ingestion_params,
+            time_columns=[
+                cons.FEED_TIMESTAMP_KEY,
+                cons.TIMESTAMP_KEY,
+                cons.TRIP_START_TIMESTAMP_KEY,
+            ],
+        )
+
     @staticmethod
     def _get_dicts_from_feed(header, entity) -> List[Dict]:
         """
@@ -576,73 +619,6 @@ class VehicleUpdatesDataIngestion(DataIngestion):
 
         return cond, latest_update
 
-    @staticmethod
-    def _format_df_feed(df_feed: pd.DataFrame) -> pd.DataFrame:
-        """
-        Convert vehicle-update feed fields to database-ready values.
-
-        Parameters
-        ----------
-        df_feed : pandas.DataFrame
-            DataFrame created from flattened vehicle feed dictionaries.
-
-        Returns
-        -------
-        pandas.DataFrame
-            Transformed DataFrame ready for DB insertion.
-        """
-
-        df_feed[cons.TRIP_START_TIMESTAMP_KEY] = pd.to_datetime(
-            df_feed[cons.TRIP_START_DATE_KEY] + " " + df_feed[cons.TRIP_START_TIME_KEY],
-            format=cons.TRIP_START_TIMESTAMP_FORMAT,
-            errors="coerce",
-        )
-
-        process_cols = df_feed.dtypes[df_feed.dtypes == "object"]
-        for col in process_cols.index:
-            df_feed[col] = df_feed[col].apply(lambda x: x if x != "" else None)
-        if cons.TRIP_START_TIME_KEY in df_feed.columns:
-            del df_feed[cons.TRIP_START_TIME_KEY]
-        if cons.TRIP_START_DATE_KEY in df_feed.columns:
-            del df_feed[cons.TRIP_START_DATE_KEY]
-        col_types = {
-            cons.ENTITY_ID_KEY: int,
-            cons.TRIP_ID_KEY: str,
-            cons.TRIP_SCHEDULE_RELATIONSHIP_KEY: int,
-            cons.TRIP_ROUTE_ID_KEY: str,
-            cons.TRIP_DIRECTION_ID_KEY: int,
-            cons.POSITION_LATITUDE_KEY: float,
-            cons.POSITION_LONGITUDE_KEY: float,
-            cons.POSITION_BEARING_KEY: float,
-            cons.POSITION_ODOMETER_KEY: float,
-            cons.POSITION_SPEED_KEY: float,
-            cons.CURRENT_STOP_SEQUENCE_KEY: int,
-            cons.CURRENT_STATUS_KEY: int,
-            cons.CONGESTION_LEVEL_KEY: int,
-            cons.STOP_ID_KEY: str,
-            cons.VEHICLE_ID_KEY: int,
-            cons.VEHICLE_LABEL_KEY: int,
-        }
-        for col, col_type in col_types.items():
-            if col in df_feed.columns:
-                df_feed[col] = df_feed[col].astype(col_type)
-
-        time_columns = [
-            cons.FEED_TIMESTAMP_KEY,
-            cons.TIMESTAMP_KEY,
-            cons.TRIP_START_TIMESTAMP_KEY,
-        ]
-        for col in time_columns:
-            df_feed[col] = DataIngestion._normalize_datetime_series(
-                df_feed[col], unit=cons.UNIX_TIMESTAMP_UNIT
-            )
-
-        # drop cols with No trip start timestamp
-        df_feed = df_feed[~df_feed[cons.TRIP_START_TIMESTAMP_KEY].isna()].reset_index(
-            drop=True
-        )
-        return df_feed
-
 
 class TripUpdatesDataIngestion(DataIngestion):
     """
@@ -667,6 +643,18 @@ class TripUpdatesDataIngestion(DataIngestion):
     CREATE_TABLE_QUERY = sql_queries.TRIP_UPDATES_CREATE_TABLE_QUERY
     INSERT_QUERY = sql_queries.TRIP_UPDATES_INSERT_QUERY
     TABLE_NAME = cons.TRIP_UPDATE_TABLE
+
+    def __init__(self, connection_params: dict, data_ingestion_params: dict):
+        super().__init__(
+            connection_params=connection_params,
+            data_ingestion_params=data_ingestion_params,
+            time_columns=[
+                cons.FEED_TIMESTAMP_KEY,
+                cons.ARRIVAL_TIME_KEY,
+                cons.DEPARTURE_TIME_KEY,
+                cons.TRIP_START_TIMESTAMP_KEY,
+            ],
+        )
 
     @staticmethod
     def _get_dicts_from_feed(header, entity) -> List[Dict]:
@@ -783,45 +771,3 @@ class TripUpdatesDataIngestion(DataIngestion):
         if cond:
             latest_update[trip_id][stop_id] = {col: entity[col] for col in check_cols}
         return cond, latest_update
-
-    @staticmethod
-    def _format_df_feed(df_feed: pd.DataFrame) -> pd.DataFrame:
-        """
-        Convert trip-update feed fields to database-ready values.
-
-        Parameters
-        ----------
-        df_feed : pandas.DataFrame
-            DataFrame created from flattened trip-update feed dictionaries.
-
-        Returns
-        -------
-        pandas.DataFrame
-            Transformed DataFrame ready for DB insertion.
-        """
-        df_feed[cons.TRIP_START_TIMESTAMP_KEY] = pd.to_datetime(
-            df_feed[cons.TRIP_START_DATE_KEY] + " " + df_feed[cons.TRIP_START_TIME_KEY],
-            format=cons.TRIP_START_TIMESTAMP_FORMAT,
-            errors="coerce",
-        )
-
-        process_cols = df_feed.dtypes[df_feed.dtypes == "object"]
-        for col in process_cols.index:
-            df_feed[col] = df_feed[col].apply(lambda x: x if x != "" else None)
-        if cons.TRIP_START_TIME_KEY in df_feed.columns:
-            del df_feed[cons.TRIP_START_TIME_KEY]
-        if cons.TRIP_START_DATE_KEY in df_feed.columns:
-            del df_feed[cons.TRIP_START_DATE_KEY]
-
-        time_columns = [
-            cons.FEED_TIMESTAMP_KEY,
-            cons.ARRIVAL_TIME_KEY,
-            cons.DEPARTURE_TIME_KEY,
-            cons.TRIP_START_TIMESTAMP_KEY,
-        ]
-        for col in time_columns:
-            df_feed[col] = DataIngestion._normalize_datetime_series(
-                df_feed[col], unit=cons.UNIX_TIMESTAMP_UNIT
-            )
-
-        return df_feed
