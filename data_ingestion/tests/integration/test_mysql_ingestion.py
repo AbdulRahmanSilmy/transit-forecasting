@@ -13,17 +13,44 @@ from data_ingestion import data_ingestion as di
 
 
 def _get_connection_params() -> dict:
+    mysql_host = os.getenv("MYSQL_HOST")
+    mysql_user = os.getenv("MYSQL_USER")
+    mysql_password = os.getenv("MYSQL_PASSWORD")
+    mysql_database = os.getenv("MYSQL_DATABASE")
+    mysql_port = os.getenv("MYSQL_PORT")
+
+    missing = [
+        key
+        for key, value in {
+            "MYSQL_HOST": mysql_host,
+            "MYSQL_USER": mysql_user,
+            "MYSQL_PASSWORD": mysql_password,
+            "MYSQL_DATABASE": mysql_database,
+            "MYSQL_PORT": mysql_port,
+        }.items()
+        if not value
+    ]
+    if missing:
+        missing_keys = ", ".join(missing)
+        pytest.skip(f"Missing required integration-test env vars: {missing_keys}")
+
+    try:
+        parsed_port = int(mysql_port)
+    except ValueError:
+        pytest.skip("Invalid MYSQL_PORT for integration tests; expected an integer")
+
     return {
-        cons.CP_HOST_KEY: os.getenv("MYSQL_HOST", "127.0.0.1"),
-        cons.CP_USER_KEY: os.getenv("MYSQL_USER", "transit"),
-        cons.CP_PASSWORD_KEY: os.getenv("MYSQL_PASSWORD", "transit123"),
-        cons.CP_DATABASE_KEY: os.getenv("MYSQL_DATABASE", "transitdb"),
-        cons.CP_PORT_KEY: int(os.getenv("MYSQL_PORT", "3307")),
+        cons.CP_HOST_KEY: mysql_host,
+        cons.CP_USER_KEY: mysql_user,
+        cons.CP_PASSWORD_KEY: mysql_password,
+        cons.CP_DATABASE_KEY: mysql_database,
+        cons.CP_PORT_KEY: parsed_port,
     }
 
 
 def _skip_if_disabled() -> None:
-    if os.getenv("RUN_INTEGRATION_TESTS") != "1":
+    run_integration_tests = os.getenv("RUN_INTEGRATION_TESTS", "0").strip().lower()
+    if run_integration_tests not in {"1", "true", "yes"}:
         pytest.skip("Integration tests require RUN_INTEGRATION_TESTS=1")
 
 

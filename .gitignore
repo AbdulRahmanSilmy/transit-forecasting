@@ -1,6 +1,9 @@
 *.code-workspace
 /data
 **/__pycache__
-**/config.yaml
+**/.env
+**/.env.*
+!**/.env.example
 **/*.log
 *.egg-info/
+**/build/

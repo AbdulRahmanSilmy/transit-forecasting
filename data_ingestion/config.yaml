@@ -1,9 +1,9 @@
 connection_params:
-  host: "mysql"
-  user: "transit"
-  password: "CHANGE_ME"
-  database: "transitdb"
-  port: 3306
+  host: "${MYSQL_HOST}"
+  user: "${MYSQL_USER}"
+  password: "${MYSQL_PASSWORD}"
+  database: "${MYSQL_DATABASE}"
+  port: ${MYSQL_PORT}
 
 vehicle_updates:
   data_ingestion_params:
