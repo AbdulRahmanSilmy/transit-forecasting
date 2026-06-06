@@ -112,6 +112,9 @@ class DataIngestion(ABC):
         Dictionary containing data ingestion parameters.
         Should include keys: ingestion_url, fetch_delay_seconds, connection_retry_delay_seconds.
 
+    time_columns : list[str]
+        List of column names in the feed that should be normalized as datetimes.
+
     Notes
     -----
     Each ingestion instance owns its own ``_latest_update`` state. The current

@@ -1,5 +1,0 @@
-requests
-pyyaml
-mysql-connector-python
-gtfs-realtime-bindings
-pandas

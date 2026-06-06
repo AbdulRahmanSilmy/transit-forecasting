@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 from typing import Any, Dict
 
 import yaml
@@ -20,6 +22,22 @@ from .constants import (
 
 class ConfigError(ValueError):
     """Raised when configuration validation fails."""
+
+
+ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _expand_env_vars(raw_text: str) -> str:
+    """Expand ${VAR_NAME} placeholders from environment variables."""
+
+    def replace(match: re.Match[str]) -> str:
+        key = match.group(1)
+        value = os.getenv(key)
+        if value is None:
+            raise ConfigError(f"Missing required environment variable: {key}")
+        return value
+
+    return ENV_VAR_PATTERN.sub(replace, raw_text)
 
 
 def _validate_required_keys(
@@ -140,7 +158,9 @@ def load_config(config_path: str = CONFIG_PATH) -> Dict[str, Any]:
         If the file is empty or missing required keys.
     """
     with open(config_path, "r", encoding="utf-8") as file:
-        config = yaml.safe_load(file)
+        raw_config = file.read()
+
+    config = yaml.safe_load(_expand_env_vars(raw_config))
 
     if config is None:
         raise ConfigError("Configuration file is empty")

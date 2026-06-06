@@ -31,7 +31,7 @@ pre-commit install
 ```
 
 ## Data Ingestion
-The ingestion scripts live under [data_ingestion/](data_ingestion) and use [data_ingestion/config.yaml.example](data_ingestion/config.yaml.example) for configuration.
+The ingestion scripts live under [data_ingestion/](data_ingestion) and use [data_ingestion/config.yaml](data_ingestion/config.yaml) for configuration.
 
 ### Docker
 The Docker Compose file is in [data_ingestion/docker-compose.yml](data_ingestion/docker-compose.yml). Run it from the `data_ingestion` directory:
@@ -42,3 +42,13 @@ docker compose up --build
 ```
 
 This starts MySQL, phpMyAdmin, and the data ingestion service.
+
+### Integration Tests In Docker
+Run integration tests inside Docker so MySQL host resolution matches the Compose network:
+
+```bash
+cd data_ingestion
+./run_integration_tests.sh
+```
+
+This runs `tests/integration/test_mysql_ingestion.py` with `RUN_INTEGRATION_TESTS=1` inside the container and restores MySQL to its original state (stops it afterward only if the script had to start it).
