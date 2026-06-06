@@ -6,6 +6,6 @@ WORKDIR /app
 # Install dependencies
 COPY pyproject.toml .
 COPY data_ingestion/ data_ingestion/
-RUN pip install --no-cache-dir .
+RUN pip install .
 
 CMD ["python", "-m", "data_ingestion"]
