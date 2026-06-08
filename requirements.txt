@@ -1,7 +1,8 @@
-gtfs-realtime-bindings
-pandas
+-e data_ingestion
 matplotlib
 notebook
 jupyterlab
-requests
 ipykernel
+geopandas
+plotly
+pre-commit

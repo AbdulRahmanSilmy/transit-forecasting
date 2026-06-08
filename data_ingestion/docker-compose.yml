@@ -1,0 +1,70 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: transit_mysql
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3307:3306"
+    command: --default-authentication-plugin=mysql_native_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", 'MYSQL_PWD="$${MYSQL_ROOT_PASSWORD}" mysqladmin ping -h localhost -uroot --silent']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: phpmyadmin
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: root
+      PMA_PASSWORD: ${PMA_PASSWORD}
+    ports:
+      - "8080:80"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  data_ingestion:
+    build: .
+    container_name: data_ingestion
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  integration_tests:
+    build: .
+    profiles: ["test"]
+    env_file:
+      - ./.env
+    environment:
+      RUN_INTEGRATION_TESTS: "1"
+    volumes:
+      - ./:/app
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: >
+      sh -c "pip install --no-cache-dir .[test] &&
+      pytest tests/integration/test_mysql_ingestion.py -q"
+
+volumes:
+  mysql_data:

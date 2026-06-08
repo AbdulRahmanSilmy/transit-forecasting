@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-ingestion"
+version = "0.1.0"
+description = "GTFS-Realtime data ingestion for transit forecasting"
+requires-python = ">=3.10"
+dependencies = [
+    "requests",
+    "pyyaml",
+    "mysql-connector-python",
+    "gtfs-realtime-bindings",
+    "pandas",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+]
+
+[tool.setuptools]
+packages = ["data_ingestion"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+data_ingestion = ["sql/*.sql"]

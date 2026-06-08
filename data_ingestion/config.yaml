@@ -1,0 +1,20 @@
+connection_params:
+  host: "${MYSQL_HOST}"
+  user: "${MYSQL_USER}"
+  password: "${MYSQL_PASSWORD}"
+  database: "${MYSQL_DATABASE}"
+  port: ${MYSQL_PORT}
+
+vehicle_updates:
+  data_ingestion_params:
+    ingestion_url: "https://bct.tmix.se/gtfs-realtime/vehicleupdates.pb?operatorIds=47"
+    fetch_delay_seconds: 5
+    connection_retry_delay_seconds: 10
+
+trip_updates:
+  data_ingestion_params:
+    ingestion_url: "https://bct.tmix.se/gtfs-realtime/tripupdates.pb?operatorIds=47"
+    fetch_delay_seconds: 5
+    connection_retry_delay_seconds: 10
+
+logging_file: "data_ingestion.log"
