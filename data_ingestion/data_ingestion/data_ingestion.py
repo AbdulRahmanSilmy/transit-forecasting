@@ -78,24 +78,43 @@ def parse_gtfs_data(data: bytes):
     return feed
 
 
-def get_field(obj, field):
+def get_field(feed, key, default=None):
     """
-    Safely retrieve an attribute from an object, returning ``None`` if missing.
+    Safely retrieve an attribute from an object using optional dotted paths.
 
     Parameters
     ----------
-    obj : object
+    feed : object
         The object to access.
 
-    field : str
-        The attribute name to retrieve.
+    key : str
+        The attribute name or dotted attribute path to retrieve.
+
+    default : Any, optional
+        The value to return if any attribute in the path is not found.
+        Defaults to ``None``.
 
     Returns
     -------
     Any
-        The attribute value if present; otherwise ``None``.
+        The resolved attribute value if present; otherwise ``default``.
+
+    Notes
+    -----
+    If ``key`` contains ``.`` separators, each segment is resolved in order
+    using ``getattr``. If any segment is missing, the function returns
+    ``default`` immediately.
     """
-    return getattr(obj, field, None)
+    keys = key.split(".")
+    if len(keys) == 1:
+        return getattr(feed, key, default)
+    else:
+        value = feed
+        for k in keys:
+            value = getattr(value, k, default)
+            if value is None:
+                return default
+        return value
 
 
 class DataIngestion(ABC):
@@ -525,9 +544,9 @@ class VehicleUpdatesDataIngestion(DataIngestion):
             connection_params=connection_params,
             data_ingestion_params=data_ingestion_params,
             time_columns=[
-                cons.FEED_TIMESTAMP_KEY,
-                cons.TIMESTAMP_KEY,
-                cons.TRIP_START_TIMESTAMP_KEY,
+                cons.VehicleTableIngestionFields.FEED_TIMESTAMP,
+                cons.VehicleTableIngestionFields.TIMESTAMP,
+                cons.VehicleTableIngestionFields.TRIP_START_TIMESTAMP,
             ],
         )
 
@@ -549,41 +568,32 @@ class VehicleUpdatesDataIngestion(DataIngestion):
         list[dict]
             A list of dictionary representations of the FeedEntity.
         """
-        vehicle = get_field(entity, cons.VEHICLE_KEY)
-        trip = get_field(vehicle, cons.TRIP_KEY)
-        position = get_field(vehicle, cons.POSITION_KEY)
-        vehicle_info = get_field(vehicle, cons.VEHICLE_KEY)
+        fields = cons.VehicleTableIngestionFields
+        raw_fields = cons.VehicleTableRawFields
 
-        return [
-            {
-                cons.FEED_TIMESTAMP_KEY: get_field(header, cons.TIMESTAMP_KEY),
-                cons.ENTITY_ID_KEY: get_field(entity, cons.ID_KEY),
-                cons.TRIP_ID_KEY: get_field(trip, cons.TRIP_ID_KEY),
-                cons.TRIP_START_TIME_KEY: get_field(trip, cons.TRIP_START_TIME_KEY),
-                cons.TRIP_START_DATE_KEY: get_field(trip, cons.TRIP_START_DATE_KEY),
-                cons.TRIP_SCHEDULE_RELATIONSHIP_KEY: get_field(
-                    trip, cons.SCHEDULE_RELATIONSHIP_KEY
-                ),
-                cons.TRIP_ROUTE_ID_KEY: get_field(trip, cons.TRIP_ROUTE_ID_KEY),
-                cons.TRIP_DIRECTION_ID_KEY: get_field(trip, cons.DIRECTION_ID_KEY),
-                cons.POSITION_LATITUDE_KEY: get_field(position, cons.LATITUDE_KEY),
-                cons.POSITION_LONGITUDE_KEY: get_field(position, cons.LONGITUDE_KEY),
-                cons.POSITION_BEARING_KEY: get_field(position, cons.BEARING_KEY),
-                cons.POSITION_ODOMETER_KEY: get_field(position, cons.ODOMETER_KEY),
-                cons.POSITION_SPEED_KEY: get_field(position, cons.SPEED_KEY),
-                cons.CURRENT_STOP_SEQUENCE_KEY: get_field(
-                    vehicle, cons.CURRENT_STOP_SEQUENCE_KEY
-                ),
-                cons.CURRENT_STATUS_KEY: get_field(vehicle, cons.CURRENT_STATUS_KEY),
-                cons.TIMESTAMP_KEY: get_field(vehicle, cons.TIMESTAMP_KEY),
-                cons.CONGESTION_LEVEL_KEY: get_field(
-                    vehicle, cons.CONGESTION_LEVEL_KEY
-                ),
-                cons.STOP_ID_KEY: get_field(vehicle, cons.STOP_ID_KEY),
-                cons.VEHICLE_ID_KEY: get_field(vehicle_info, cons.ID_KEY),
-                cons.VEHICLE_LABEL_KEY: get_field(vehicle_info, cons.LABEL_KEY),
-            }
-        ]
+        def _entity_value(raw_path: str):
+            return get_field(entity, raw_path.removeprefix("entity."))
+
+        def _header_value(raw_path: str):
+            return get_field(header, raw_path.removeprefix("header."))
+
+        mapped_entity = {}
+        for name, raw_path in vars(raw_fields).items():
+            if not name.isupper():
+                continue
+
+            column = getattr(fields, name, None)
+            if column is None:
+                continue
+
+            if raw_path.startswith("header."):
+                mapped_entity[column] = _header_value(raw_path)
+            elif raw_path.startswith("entity."):
+                mapped_entity[column] = _entity_value(raw_path)
+            else:
+                mapped_entity[column] = get_field(entity, raw_path)
+
+        return [mapped_entity]
 
     @staticmethod
     def _check_duplicate_entity(entity, latest_update) -> Tuple[bool, Dict]:
@@ -606,7 +616,8 @@ class VehicleUpdatesDataIngestion(DataIngestion):
             Updated tracking state for latest vehicle timestamps, with the current entity's
             timestamp included if it is newer than the existing record for that vehicle.
         """
-        vehicle_id = entity.get(cons.VEHICLE_ID_KEY)
+        fields = cons.VehicleTableIngestionFields
+        vehicle_id = entity.get(fields.VEHICLE_ID)
 
         if vehicle_id is None:
             return False, latest_update
@@ -614,11 +625,11 @@ class VehicleUpdatesDataIngestion(DataIngestion):
         cond = vehicle_id not in latest_update
         cond |= (
             vehicle_id in latest_update
-            and entity[cons.TIMESTAMP_KEY] > latest_update[vehicle_id]
+            and entity[fields.TIMESTAMP] > latest_update[vehicle_id]
         )
 
         if cond:
-            latest_update[vehicle_id] = entity[cons.TIMESTAMP_KEY]
+            latest_update[vehicle_id] = entity[fields.TIMESTAMP]
 
         return cond, latest_update
 
@@ -652,10 +663,10 @@ class TripUpdatesDataIngestion(DataIngestion):
             connection_params=connection_params,
             data_ingestion_params=data_ingestion_params,
             time_columns=[
-                cons.FEED_TIMESTAMP_KEY,
-                cons.ARRIVAL_TIME_KEY,
-                cons.DEPARTURE_TIME_KEY,
-                cons.TRIP_START_TIMESTAMP_KEY,
+                cons.TripTableIngestionFields.FEED_TIMESTAMP,
+                cons.TripTableIngestionFields.ARRIVAL_TIME,
+                cons.TripTableIngestionFields.DEPARTURE_TIME,
+                cons.TripTableIngestionFields.TRIP_START_TIMESTAMP,
             ],
         )
 
@@ -677,47 +688,39 @@ class TripUpdatesDataIngestion(DataIngestion):
         list[dict]
             A list of dictionary representations of the FeedEntity.
         """
+        fields = cons.TripTableIngestionFields
+        raw_fields = cons.TripTableRawFields
+
         trip_update = get_field(entity, cons.TRIP_UPDATE_KEY)
-        trip = get_field(trip_update, cons.TRIP_KEY)
         stop_time_update = get_field(trip_update, cons.STOP_TIME_UPDATE_KEY)
-        base_dict = {
-            cons.FEED_TIMESTAMP_KEY: get_field(header, cons.TIMESTAMP_KEY),
-            cons.TRIP_ID_KEY: get_field(trip, cons.TRIP_ID_KEY),
-            cons.TRIP_START_TIME_KEY: get_field(trip, cons.TRIP_START_TIME_KEY),
-            cons.TRIP_START_DATE_KEY: get_field(trip, cons.TRIP_START_DATE_KEY),
-            cons.TRIP_SCHEDULE_RELATIONSHIP_KEY: get_field(
-                trip, cons.SCHEDULE_RELATIONSHIP_KEY
-            ),
-            cons.TRIP_ROUTE_ID_KEY: get_field(trip, cons.TRIP_ROUTE_ID_KEY),
-            cons.TRIP_DIRECTION_ID_KEY: get_field(trip, cons.DIRECTION_ID_KEY),
-        }
+
         list_dicts = []
         if not stop_time_update:
             return list_dicts
+
         for stu in stop_time_update:
-            dict_str = base_dict.copy()
-            arrival = get_field(stu, cons.ARRIVAL_KEY)
-            departure = get_field(stu, cons.DEPARTURE_KEY)
-            dict_str.update(
-                {
-                    cons.STOP_SEQUENCE_KEY: get_field(stu, cons.STOP_SEQUENCE_KEY),
-                    cons.STOP_ID_KEY: get_field(stu, cons.STOP_ID_KEY),
-                    cons.SCHEDULE_RELATIONSHIP_KEY: get_field(
-                        stu, cons.SCHEDULE_RELATIONSHIP_KEY
-                    ),
-                    cons.ARRIVAL_DELAY_KEY: get_field(arrival, cons.DELAY_KEY),
-                    cons.ARRIVAL_TIME_KEY: get_field(arrival, cons.TIME_KEY),
-                    cons.ARRIVAL_UNCERTAINTY_KEY: get_field(
-                        arrival, cons.UNCERTAINTY_KEY
-                    ),
-                    cons.DEPARTURE_DELAY_KEY: get_field(departure, cons.DELAY_KEY),
-                    cons.DEPARTURE_TIME_KEY: get_field(departure, cons.TIME_KEY),
-                    cons.DEPARTURE_UNCERTAINTY_KEY: get_field(
-                        departure, cons.UNCERTAINTY_KEY
-                    ),
-                }
-            )
-            list_dicts.append(dict_str)
+
+            def _resolve(raw_path: str):
+                if raw_path.startswith("header."):
+                    return get_field(header, raw_path.removeprefix("header."))
+                if raw_path.startswith("entity.trip_update.trip."):
+                    return get_field(
+                        trip_update, raw_path.removeprefix("entity.trip_update.")
+                    )
+                if raw_path.startswith("stop_time_update."):
+                    return get_field(stu, raw_path.removeprefix("stop_time_update."))
+                return None
+
+            mapped = {}
+            for name, raw_path in vars(raw_fields).items():
+                if not name.isupper():
+                    continue
+                column = getattr(fields, name, None)
+                if column is None:
+                    continue
+                mapped[column] = _resolve(raw_path)
+
+            list_dicts.append(mapped)
 
         return list_dicts
 
@@ -743,17 +746,18 @@ class TripUpdatesDataIngestion(DataIngestion):
             snapshot included if it is newer than the existing record for that trip/stop.
         """
 
+        fields = cons.TripTableIngestionFields
         check_cols = [
-            cons.ARRIVAL_DELAY_KEY,
-            cons.ARRIVAL_TIME_KEY,
-            cons.ARRIVAL_UNCERTAINTY_KEY,
-            cons.DEPARTURE_DELAY_KEY,
-            cons.DEPARTURE_TIME_KEY,
-            cons.DEPARTURE_UNCERTAINTY_KEY,
+            fields.ARRIVAL_DELAY,
+            fields.ARRIVAL_TIME,
+            fields.ARRIVAL_UNCERTAINTY,
+            fields.DEPARTURE_DELAY,
+            fields.DEPARTURE_TIME,
+            fields.DEPARTURE_UNCERTAINTY,
         ]
 
-        trip_id = entity.get(cons.TRIP_ID_KEY)
-        stop_id = entity.get(cons.STOP_ID_KEY)
+        trip_id = entity.get(fields.TRIP_ID)
+        stop_id = entity.get(fields.STOP_ID)
         cond = False
 
         # If we don't have valid identifiers, we cannot reliably deduplicate.
