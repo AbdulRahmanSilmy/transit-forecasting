@@ -51,3 +51,41 @@ def test_format_df_feed_adds_timestamp_and_normalizes():
     assert trip_fields.TRIP_START_TIMESTAMP_KEY in formatted.columns
     assert formatted[vehicle_fields.TIMESTAMP_KEY].dtype == object
     assert formatted[vehicle_fields.FEED_TIMESTAMP_KEY].dtype == object
+
+
+def test_prepare_insert_rows_uses_ingestion_field_order():
+    ingestion = _ingestion()
+    fields = cons.VehicleTableIngestionFields
+
+    # Intentionally shuffled DataFrame columns to ensure method reorders safely.
+    df = pd.DataFrame(
+        {
+            fields.POSITION_LONGITUDE: [-119.5],
+            fields.FEED_TIMESTAMP: [pd.Timestamp("2024-01-01 00:00:00")],
+            fields.ENTITY_ID: [1],
+            fields.TRIP_ID: ["trip-1"],
+            fields.TRIP_START_TIME: ["12:00:00"],
+            fields.TRIP_START_DATE: ["20240101"],
+            fields.TRIP_SCHEDULE_RELATIONSHIP: [0],
+            fields.TRIP_ROUTE_ID: ["97"],
+            fields.TRIP_DIRECTION_ID: [0],
+            fields.POSITION_LATITUDE: [49.88],
+            fields.POSITION_BEARING: [1.0],
+            fields.POSITION_ODOMETER: [None],
+            fields.POSITION_SPEED: [10.0],
+            fields.CURRENT_STOP_SEQUENCE: [12],
+            fields.CURRENT_STATUS: [2],
+            fields.TIMESTAMP: [pd.Timestamp("2024-01-01 00:00:01")],
+            fields.CONGESTION_LEVEL: [None],
+            fields.STOP_ID: ["stop-1"],
+            fields.VEHICLE_ID: ["veh-1"],
+            fields.VEHICLE_LABEL: ["label-1"],
+            fields.TRIP_START_TIMESTAMP: [pd.Timestamp("2024-01-01 12:00:00")],
+        }
+    )
+
+    rows = ingestion._prepare_insert_rows(df)
+    assert len(rows) == 1
+
+    expected = tuple(df[ingestion._ordered_ingestion_columns].iloc[0])
+    assert rows[0] == expected

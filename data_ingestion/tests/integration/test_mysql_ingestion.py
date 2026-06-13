@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import logging
 import os
+import threading
+import time
+from pathlib import Path
 
 import mysql.connector
 import pytest
@@ -195,3 +199,82 @@ def test_trip_updates_insert_round_trip():
         conn.close()
 
     assert count == 1
+
+
+@pytest.mark.integration
+def test_vehicle_ingestion_pipeline_with_test_table_and_clean_logs(
+    tmp_path: Path, monkeypatch
+):
+    _skip_if_disabled()
+
+    test_table = f"{cons.VEHICLE_UPDATE_TABLE}_PIPELINE_TEST"
+
+    ingestion = di.VehicleUpdatesDataIngestion(
+        connection_params=_get_connection_params(),
+        data_ingestion_params={
+            cons.DIP_INGESTION_URL_KEY: "http://example.com/vehicle.pb",
+            cons.DIP_FETCH_DELAY_SECONDS_KEY: 1,
+            cons.DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY: 1,
+        },
+    )
+
+    ingestion.TABLE_NAME = test_table
+    ingestion.CREATE_TABLE_QUERY = ingestion.CREATE_TABLE_QUERY.replace(
+        cons.VEHICLE_UPDATE_TABLE, test_table
+    )
+    ingestion.INSERT_QUERY = ingestion.INSERT_QUERY.replace(
+        cons.VEHICLE_UPDATE_TABLE, test_table
+    )
+
+    feed_bytes = _build_vehicle_feed_bytes()
+    monkeypatch.setattr(di, "fetch_gtfs_data", lambda _url: feed_bytes)
+
+    log_path = tmp_path / "vehicle_ingestion_pipeline.log"
+    module_logger = logging.getLogger(di.__name__)
+    previous_handlers = list(module_logger.handlers)
+    previous_level = module_logger.level
+    previous_propagate = module_logger.propagate
+
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+
+    module_logger.handlers = [handler]
+    module_logger.setLevel(logging.INFO)
+    module_logger.propagate = False
+
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=ingestion.run_ingestion_loop,
+        args=(stop_event,),
+        daemon=True,
+    )
+    thread.start()
+
+    # Allow at least one fetch/process cycle to complete.
+    time.sleep(3)
+
+    stop_event.set()
+    thread.join(timeout=10)
+
+    handler.flush()
+    handler.close()
+    module_logger.handlers = previous_handlers
+    module_logger.setLevel(previous_level)
+    module_logger.propagate = previous_propagate
+
+    conn = mysql.connector.connect(**ingestion.connection_params)
+    cur = conn.cursor()
+    try:
+        cur.execute(f"SELECT COUNT(*) FROM {ingestion.TABLE_NAME}")
+        inserted_count = cur.fetchone()[0]
+        cur.execute(f"DROP TABLE IF EXISTS {ingestion.TABLE_NAME}")
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+    log_contents = log_path.read_text(encoding="utf-8")
+    assert inserted_count >= 1
+    assert "[ERROR]" not in log_contents
+    assert "Traceback" not in log_contents
