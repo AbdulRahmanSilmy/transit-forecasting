@@ -1,6 +1,6 @@
 """Shared constants for configuration, schema, and GTFS feed fields."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 # Configuration
 CONFIG_PATH = "config.yaml"
@@ -146,6 +146,20 @@ def _validate_ingestion_fields(raw_fields, ingestion_fields) -> None:
         )
 
 
+def _build_ingestion_fields(raw_fields, ingestion_cls, extra_fields=None):
+    """Build ingestion mappings from raw field names with optional extras."""
+
+    mapping = {
+        field.name: field.name.lower()
+        for field in fields(raw_fields)
+        if field.name.isupper()
+    }
+    if extra_fields:
+        mapping.update(extra_fields)
+
+    return ingestion_cls(**mapping)
+
+
 TripTableRawFields = _TripRawFields(
     FEED_TIMESTAMP="header.timestamp",
     TRIP_ID="entity.trip_update.trip.trip_id",
@@ -165,24 +179,10 @@ TripTableRawFields = _TripRawFields(
     DEPARTURE_UNCERTAINTY="entity.trip_update.stop_time_update.departure.uncertainty",
 )
 
-TripTableIngestionFields = _TripIngestionFields(
-    FEED_TIMESTAMP="feed_timestamp",
-    TRIP_ID="trip_id",
-    TRIP_START_TIME="trip_start_time",
-    TRIP_START_DATE="trip_start_date",
-    TRIP_SCHEDULE_RELATIONSHIP="trip_schedule_relationship",
-    TRIP_ROUTE_ID="trip_route_id",
-    TRIP_DIRECTION_ID="trip_direction_id",
-    STOP_SEQUENCE="stop_sequence",
-    STOP_ID="stop_id",
-    SCHEDULE_RELATIONSHIP="schedule_relationship",
-    ARRIVAL_DELAY="arrival_delay",
-    ARRIVAL_TIME="arrival_time",
-    ARRIVAL_UNCERTAINTY="arrival_uncertainty",
-    DEPARTURE_DELAY="departure_delay",
-    DEPARTURE_TIME="departure_time",
-    DEPARTURE_UNCERTAINTY="departure_uncertainty",
-    TRIP_START_TIMESTAMP="trip_start_timestamp",
+TripTableIngestionFields = _build_ingestion_fields(
+    raw_fields=TripTableRawFields,
+    ingestion_cls=_TripIngestionFields,
+    extra_fields={"TRIP_START_TIMESTAMP": "trip_start_timestamp"},
 )
 
 VehicleTableRawFields = _VehicleRawFields(
@@ -208,28 +208,10 @@ VehicleTableRawFields = _VehicleRawFields(
     VEHICLE_LABEL="entity.vehicle.vehicle.label",
 )
 
-VehicleTableIngestionFields = _VehicleIngestionFields(
-    FEED_TIMESTAMP="feed_timestamp",
-    ENTITY_ID="entity_id",
-    TRIP_ID="trip_id",
-    TRIP_START_TIME="trip_start_time",
-    TRIP_START_DATE="trip_start_date",
-    TRIP_SCHEDULE_RELATIONSHIP="trip_schedule_relationship",
-    TRIP_ROUTE_ID="trip_route_id",
-    TRIP_DIRECTION_ID="trip_direction_id",
-    POSITION_LATITUDE="position_latitude",
-    POSITION_LONGITUDE="position_longitude",
-    POSITION_BEARING="position_bearing",
-    POSITION_ODOMETER="position_odometer",
-    POSITION_SPEED="position_speed",
-    CURRENT_STOP_SEQUENCE="current_stop_sequence",
-    CURRENT_STATUS="current_status",
-    TIMESTAMP="timestamp",
-    CONGESTION_LEVEL="congestion_level",
-    STOP_ID="stop_id",
-    VEHICLE_ID="vehicle_id",
-    VEHICLE_LABEL="vehicle_label",
-    TRIP_START_TIMESTAMP="trip_start_timestamp",
+VehicleTableIngestionFields = _build_ingestion_fields(
+    raw_fields=VehicleTableRawFields,
+    ingestion_cls=_VehicleIngestionFields,
+    extra_fields={"TRIP_START_TIMESTAMP": "trip_start_timestamp"},
 )
 
 _validate_ingestion_fields(TripTableRawFields, TripTableIngestionFields)
