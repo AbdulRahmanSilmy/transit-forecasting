@@ -31,21 +31,23 @@ def test_to_python_datetime_rejects_small_year():
 
 def test_format_df_feed_adds_timestamp_and_normalizes():
     ingestion = _ingestion()
+    trip_fields = cons.TripTableIngestionFields
+    vehicle_fields = cons.VehicleTableIngestionFields
     df = pd.DataFrame(
         {
-            cons.TRIP_START_DATE_KEY: ["20240101"],
-            cons.TRIP_START_TIME_KEY: ["12:00:00"],
-            cons.TIMESTAMP_KEY: [1700000000],
-            cons.FEED_TIMESTAMP_KEY: [1700000001],
-            cons.ENTITY_ID_KEY: ["1"],
-            cons.VEHICLE_ID_KEY: ["veh1"],
+            trip_fields.TRIP_START_DATE_KEY: ["20240101"],
+            trip_fields.TRIP_START_TIME_KEY: ["12:00:00"],
+            vehicle_fields.TIMESTAMP_KEY: [1700000000],
+            vehicle_fields.FEED_TIMESTAMP_KEY: [1700000001],
+            vehicle_fields.ENTITY_ID_KEY: ["1"],
+            vehicle_fields.VEHICLE_ID_KEY: ["veh1"],
         }
     )
 
     formatted = ingestion._format_df_feed(df)
 
-    assert cons.TRIP_START_TIME_KEY not in formatted.columns
-    assert cons.TRIP_START_DATE_KEY not in formatted.columns
-    assert cons.TRIP_START_TIMESTAMP_KEY in formatted.columns
-    assert formatted[cons.TIMESTAMP_KEY].dtype == object
-    assert formatted[cons.FEED_TIMESTAMP_KEY].dtype == object
+    assert trip_fields.TRIP_START_TIME_KEY not in formatted.columns
+    assert trip_fields.TRIP_START_DATE_KEY not in formatted.columns
+    assert trip_fields.TRIP_START_TIMESTAMP_KEY in formatted.columns
+    assert formatted[vehicle_fields.TIMESTAMP_KEY].dtype == object
+    assert formatted[vehicle_fields.FEED_TIMESTAMP_KEY].dtype == object

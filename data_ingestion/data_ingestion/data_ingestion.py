@@ -236,14 +236,16 @@ class DataIngestion(ABC):
         pandas.DataFrame
             A transformed DataFrame with properly-typed columns ready for DB insert.
         """
+        trip_fields = cons.TripTableIngestionFields
+
         if (
-            cons.TRIP_START_TIME_KEY in df_feed.columns
-            and cons.TRIP_START_DATE_KEY in df_feed.columns
+            trip_fields.TRIP_START_TIME_KEY in df_feed.columns
+            and trip_fields.TRIP_START_DATE_KEY in df_feed.columns
         ):
-            df_feed[cons.TRIP_START_TIMESTAMP_KEY] = pd.to_datetime(
-                df_feed[cons.TRIP_START_DATE_KEY]
+            df_feed[trip_fields.TRIP_START_TIMESTAMP_KEY] = pd.to_datetime(
+                df_feed[trip_fields.TRIP_START_DATE_KEY]
                 + " "
-                + df_feed[cons.TRIP_START_TIME_KEY],
+                + df_feed[trip_fields.TRIP_START_TIME_KEY],
                 format=cons.TRIP_START_TIMESTAMP_FORMAT,
                 errors="coerce",
             )
@@ -252,10 +254,10 @@ class DataIngestion(ABC):
         for col in process_cols.index:
             df_feed[col] = df_feed[col].apply(lambda x: x if x != "" else None)
 
-        if cons.TRIP_START_TIME_KEY in df_feed.columns:
-            del df_feed[cons.TRIP_START_TIME_KEY]
-        if cons.TRIP_START_DATE_KEY in df_feed.columns:
-            del df_feed[cons.TRIP_START_DATE_KEY]
+        if trip_fields.TRIP_START_TIME_KEY in df_feed.columns:
+            del df_feed[trip_fields.TRIP_START_TIME_KEY]
+        if trip_fields.TRIP_START_DATE_KEY in df_feed.columns:
+            del df_feed[trip_fields.TRIP_START_DATE_KEY]
 
         for col in self._time_columns:
             if col in df_feed.columns:
