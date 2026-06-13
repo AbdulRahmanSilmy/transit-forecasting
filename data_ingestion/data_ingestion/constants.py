@@ -1,6 +1,10 @@
 """Shared constants for configuration, schema, and GTFS feed fields."""
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
+from dataclasses import fields as dataclass_fields
+
+# expose for use by other modules in the package
+__all__ = ["dataclass_fields"]
 
 # Configuration
 CONFIG_PATH = "config.yaml"
@@ -38,43 +42,26 @@ VEHICLE_UPDATE_TABLE = "TRANSIT_VEHICLE_TABLE"
 TRIP_UPDATE_TABLE = "TRANSIT_TRIP_TABLE"
 
 
-class _FieldGroup:
-    """Base helper for field-group dataclasses."""
-
-    def __getattr__(self, name: str) -> str:
-        """Resolve derived uppercase ``*_KEY`` accessors."""
-
-        if name.endswith("_KEY"):
-            base_name = name[:-4]
-            if base_name.isupper() and base_name in self.__dataclass_fields__:
-                value = object.__getattribute__(self, base_name)
-                return value.rsplit(".", maxsplit=1)[-1]
-
-        raise AttributeError(
-            f"{self.__class__.__name__!s} object has no attribute {name!r}"
-        )
-
-
 @dataclass(frozen=True)
-class _TripSharedFields(_FieldGroup):
+class _TripSharedFields:
     """Field names shared by raw and ingestion trip update mappings."""
 
-    FEED_TIMESTAMP: str
-    TRIP_ID: str
-    TRIP_START_TIME: str
-    TRIP_START_DATE: str
-    TRIP_SCHEDULE_RELATIONSHIP: str
-    TRIP_ROUTE_ID: str
-    TRIP_DIRECTION_ID: str
-    STOP_SEQUENCE: str
-    STOP_ID: str
-    SCHEDULE_RELATIONSHIP: str
-    ARRIVAL_DELAY: str
-    ARRIVAL_TIME: str
-    ARRIVAL_UNCERTAINTY: str
-    DEPARTURE_DELAY: str
-    DEPARTURE_TIME: str
-    DEPARTURE_UNCERTAINTY: str
+    feed_timestamp: str
+    trip_id: str
+    trip_start_time: str
+    trip_start_date: str
+    trip_schedule_relationship: str
+    trip_route_id: str
+    trip_direction_id: str
+    stop_sequence: str
+    stop_id: str
+    schedule_relationship: str
+    arrival_delay: str
+    arrival_time: str
+    arrival_uncertainty: str
+    departure_delay: str
+    departure_time: str
+    departure_uncertainty: str
 
 
 @dataclass(frozen=True)
@@ -86,33 +73,33 @@ class _TripRawFields(_TripSharedFields):
 class _TripIngestionFields(_TripSharedFields):
     """Flattened GTFS feed field names used in ingestion for trip updates."""
 
-    TRIP_START_TIMESTAMP: str
+    trip_start_timestamp: str
 
 
 @dataclass(frozen=True)
-class _VehicleSharedFields(_FieldGroup):
+class _VehicleSharedFields:
     """Field names shared by raw and ingestion vehicle update mappings."""
 
-    FEED_TIMESTAMP: str
-    ENTITY_ID: str
-    TRIP_ID: str
-    TRIP_START_TIME: str
-    TRIP_START_DATE: str
-    TRIP_SCHEDULE_RELATIONSHIP: str
-    TRIP_ROUTE_ID: str
-    TRIP_DIRECTION_ID: str
-    POSITION_LATITUDE: str
-    POSITION_LONGITUDE: str
-    POSITION_BEARING: str
-    POSITION_ODOMETER: str
-    POSITION_SPEED: str
-    CURRENT_STOP_SEQUENCE: str
-    CURRENT_STATUS: str
-    TIMESTAMP: str
-    CONGESTION_LEVEL: str
-    STOP_ID: str
-    VEHICLE_ID: str
-    VEHICLE_LABEL: str
+    feed_timestamp: str
+    entity_id: str
+    trip_id: str
+    trip_start_time: str
+    trip_start_date: str
+    trip_schedule_relationship: str
+    trip_route_id: str
+    trip_direction_id: str
+    position_latitude: str
+    position_longitude: str
+    position_bearing: str
+    position_odometer: str
+    position_speed: str
+    current_stop_sequence: str
+    current_status: str
+    timestamp: str
+    congestion_level: str
+    stop_id: str
+    vehicle_id: str
+    vehicle_label: str
 
 
 @dataclass(frozen=True)
@@ -124,21 +111,15 @@ class _VehicleRawFields(_VehicleSharedFields):
 class _VehicleIngestionFields(_VehicleSharedFields):
     """Flattened GTFS feed field names used in ingestion for vehicle updates."""
 
-    TRIP_START_TIMESTAMP: str
-
-
-def _uppercase_field_names(field_group) -> set[str]:
-    """Return uppercase attribute names defined on a field-group object."""
-
-    return {name for name in vars(field_group) if name.isupper()}
+    trip_start_timestamp: str
 
 
 def _validate_ingestion_fields(raw_fields, ingestion_fields) -> None:
     """Ensure every raw field name has a matching ingestion field name."""
 
-    missing_fields = sorted(
-        _uppercase_field_names(raw_fields) - _uppercase_field_names(ingestion_fields)
-    )
+    raw_names = {f.name for f in dataclass_fields(raw_fields)}
+    ingestion_names = {f.name for f in dataclass_fields(ingestion_fields)}
+    missing_fields = sorted(raw_names - ingestion_names)
     if missing_fields:
         raise ValueError(
             "Missing ingestion field definitions for raw fields: "
@@ -149,11 +130,7 @@ def _validate_ingestion_fields(raw_fields, ingestion_fields) -> None:
 def _build_ingestion_fields(raw_fields, ingestion_cls, extra_fields=None):
     """Build ingestion mappings from raw field names with optional extras."""
 
-    mapping = {
-        field.name: field.name.lower()
-        for field in fields(raw_fields)
-        if field.name.isupper()
-    }
+    mapping = {f.name: f.name for f in dataclass_fields(raw_fields)}
     if extra_fields:
         mapping.update(extra_fields)
 
@@ -161,57 +138,57 @@ def _build_ingestion_fields(raw_fields, ingestion_cls, extra_fields=None):
 
 
 TripTableRawFields = _TripRawFields(
-    FEED_TIMESTAMP="header.timestamp",
-    TRIP_ID="entity.trip_update.trip.trip_id",
-    TRIP_START_TIME="entity.trip_update.trip.start_time",
-    TRIP_START_DATE="entity.trip_update.trip.start_date",
-    TRIP_SCHEDULE_RELATIONSHIP="entity.trip_update.trip.schedule_relationship",
-    TRIP_ROUTE_ID="entity.trip_update.trip.route_id",
-    TRIP_DIRECTION_ID="entity.trip_update.trip.direction_id",
-    STOP_SEQUENCE="entity.trip_update.stop_time_update.stop_sequence",
-    STOP_ID="entity.trip_update.stop_time_update.stop_id",
-    SCHEDULE_RELATIONSHIP="entity.trip_update.stop_time_update.schedule_relationship",
-    ARRIVAL_DELAY="entity.trip_update.stop_time_update.arrival.delay",
-    ARRIVAL_TIME="entity.trip_update.stop_time_update.arrival.time",
-    ARRIVAL_UNCERTAINTY="entity.trip_update.stop_time_update.arrival.uncertainty",
-    DEPARTURE_DELAY="entity.trip_update.stop_time_update.departure.delay",
-    DEPARTURE_TIME="entity.trip_update.stop_time_update.departure.time",
-    DEPARTURE_UNCERTAINTY="entity.trip_update.stop_time_update.departure.uncertainty",
+    feed_timestamp="header.timestamp",
+    trip_id="entity.trip_update.trip.trip_id",
+    trip_start_time="entity.trip_update.trip.start_time",
+    trip_start_date="entity.trip_update.trip.start_date",
+    trip_schedule_relationship="entity.trip_update.trip.schedule_relationship",
+    trip_route_id="entity.trip_update.trip.route_id",
+    trip_direction_id="entity.trip_update.trip.direction_id",
+    stop_sequence="entity.trip_update.stop_time_update.stop_sequence",
+    stop_id="entity.trip_update.stop_time_update.stop_id",
+    schedule_relationship="entity.trip_update.stop_time_update.schedule_relationship",
+    arrival_delay="entity.trip_update.stop_time_update.arrival.delay",
+    arrival_time="entity.trip_update.stop_time_update.arrival.time",
+    arrival_uncertainty="entity.trip_update.stop_time_update.arrival.uncertainty",
+    departure_delay="entity.trip_update.stop_time_update.departure.delay",
+    departure_time="entity.trip_update.stop_time_update.departure.time",
+    departure_uncertainty="entity.trip_update.stop_time_update.departure.uncertainty",
 )
 
 TripTableIngestionFields = _build_ingestion_fields(
     raw_fields=TripTableRawFields,
     ingestion_cls=_TripIngestionFields,
-    extra_fields={"TRIP_START_TIMESTAMP": "trip_start_timestamp"},
+    extra_fields={"trip_start_timestamp": "trip_start_timestamp"},
 )
 
 VehicleTableRawFields = _VehicleRawFields(
-    FEED_TIMESTAMP="header.timestamp",
-    ENTITY_ID="entity.id",
-    TRIP_ID="entity.vehicle.trip.trip_id",
-    TRIP_START_TIME="entity.vehicle.trip.start_time",
-    TRIP_START_DATE="entity.vehicle.trip.start_date",
-    TRIP_SCHEDULE_RELATIONSHIP="entity.vehicle.trip.schedule_relationship",
-    TRIP_ROUTE_ID="entity.vehicle.trip.route_id",
-    TRIP_DIRECTION_ID="entity.vehicle.trip.direction_id",
-    POSITION_LATITUDE="entity.vehicle.position.latitude",
-    POSITION_LONGITUDE="entity.vehicle.position.longitude",
-    POSITION_BEARING="entity.vehicle.position.bearing",
-    POSITION_ODOMETER="entity.vehicle.position.odometer",
-    POSITION_SPEED="entity.vehicle.position.speed",
-    CURRENT_STOP_SEQUENCE="entity.vehicle.current_stop_sequence",
-    CURRENT_STATUS="entity.vehicle.current_status",
-    TIMESTAMP="entity.vehicle.timestamp",
-    CONGESTION_LEVEL="entity.vehicle.congestion_level",
-    STOP_ID="entity.vehicle.stop_id",
-    VEHICLE_ID="entity.vehicle.vehicle.id",
-    VEHICLE_LABEL="entity.vehicle.vehicle.label",
+    feed_timestamp="header.timestamp",
+    entity_id="entity.id",
+    trip_id="entity.vehicle.trip.trip_id",
+    trip_start_time="entity.vehicle.trip.start_time",
+    trip_start_date="entity.vehicle.trip.start_date",
+    trip_schedule_relationship="entity.vehicle.trip.schedule_relationship",
+    trip_route_id="entity.vehicle.trip.route_id",
+    trip_direction_id="entity.vehicle.trip.direction_id",
+    position_latitude="entity.vehicle.position.latitude",
+    position_longitude="entity.vehicle.position.longitude",
+    position_bearing="entity.vehicle.position.bearing",
+    position_odometer="entity.vehicle.position.odometer",
+    position_speed="entity.vehicle.position.speed",
+    current_stop_sequence="entity.vehicle.current_stop_sequence",
+    current_status="entity.vehicle.current_status",
+    timestamp="entity.vehicle.timestamp",
+    congestion_level="entity.vehicle.congestion_level",
+    stop_id="entity.vehicle.stop_id",
+    vehicle_id="entity.vehicle.vehicle.id",
+    vehicle_label="entity.vehicle.vehicle.label",
 )
 
 VehicleTableIngestionFields = _build_ingestion_fields(
     raw_fields=VehicleTableRawFields,
     ingestion_cls=_VehicleIngestionFields,
-    extra_fields={"TRIP_START_TIMESTAMP": "trip_start_timestamp"},
+    extra_fields={"trip_start_timestamp": "trip_start_timestamp"},
 )
 
 _validate_ingestion_fields(TripTableRawFields, TripTableIngestionFields)

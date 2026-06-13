@@ -9,7 +9,7 @@ from data_ingestion import data_ingestion as di
 def test_vehicle_update_duplicate_detection():
     fields = cons.VehicleTableIngestionFields
     latest = {}
-    entity = {fields.VEHICLE_ID: "veh1", fields.TIMESTAMP: 10}
+    entity = {fields.vehicle_id: "veh1", fields.timestamp: 10}
 
     cond, latest = di.VehicleUpdatesDataIngestion._check_duplicate_entity(
         entity, latest
@@ -21,7 +21,7 @@ def test_vehicle_update_duplicate_detection():
     )
     assert cond is False
 
-    newer = {fields.VEHICLE_ID: "veh1", fields.TIMESTAMP: 11}
+    newer = {fields.vehicle_id: "veh1", fields.timestamp: 11}
     cond, latest = di.VehicleUpdatesDataIngestion._check_duplicate_entity(newer, latest)
     assert cond is True
 
@@ -30,14 +30,14 @@ def test_trip_update_duplicate_detection():
     fields = cons.TripTableIngestionFields
     latest = {}
     base = {
-        fields.TRIP_ID: "trip1",
-        fields.STOP_ID: "stop1",
-        fields.ARRIVAL_DELAY: 0,
-        fields.ARRIVAL_TIME: 1,
-        fields.ARRIVAL_UNCERTAINTY: 0,
-        fields.DEPARTURE_DELAY: 0,
-        fields.DEPARTURE_TIME: 2,
-        fields.DEPARTURE_UNCERTAINTY: 0,
+        fields.trip_id: "trip1",
+        fields.stop_id: "stop1",
+        fields.arrival_delay: 0,
+        fields.arrival_time: 1,
+        fields.arrival_uncertainty: 0,
+        fields.departure_delay: 0,
+        fields.departure_time: 2,
+        fields.departure_uncertainty: 0,
     }
 
     cond, latest = di.TripUpdatesDataIngestion._check_duplicate_entity(base, latest)
@@ -47,7 +47,7 @@ def test_trip_update_duplicate_detection():
     assert cond is False
 
     changed = dict(base)
-    changed[fields.ARRIVAL_DELAY] = 5
+    changed[fields.arrival_delay] = 5
     cond, latest = di.TripUpdatesDataIngestion._check_duplicate_entity(changed, latest)
     assert cond is True
 
@@ -56,14 +56,14 @@ def test_trip_update_missing_identifiers():
     fields = cons.TripTableIngestionFields
     latest = {}
     entity = {
-        fields.TRIP_ID: None,
-        fields.STOP_ID: None,
-        fields.ARRIVAL_DELAY: 0,
-        fields.ARRIVAL_TIME: 1,
-        fields.ARRIVAL_UNCERTAINTY: 0,
-        fields.DEPARTURE_DELAY: 0,
-        fields.DEPARTURE_TIME: 2,
-        fields.DEPARTURE_UNCERTAINTY: 0,
+        fields.trip_id: None,
+        fields.stop_id: None,
+        fields.arrival_delay: 0,
+        fields.arrival_time: 1,
+        fields.arrival_uncertainty: 0,
+        fields.departure_delay: 0,
+        fields.departure_time: 2,
+        fields.departure_uncertainty: 0,
     }
 
     cond, latest = di.TripUpdatesDataIngestion._check_duplicate_entity(entity, latest)

@@ -14,35 +14,30 @@ def test_queries_are_formatted():
 
 
 def test_raw_field_names_are_present_in_ingestion_field_names():
-    trip_raw_names = {name for name in vars(cons.TripTableRawFields) if name.isupper()}
-    trip_ingestion_names = {
-        name for name in vars(cons.TripTableIngestionFields) if name.isupper()
-    }
-    vehicle_raw_names = {
-        name for name in vars(cons.VehicleTableRawFields) if name.isupper()
-    }
+    from dataclasses import fields as dc_fields
+
+    trip_raw_names = {f.name for f in dc_fields(cons.TripTableRawFields)}
+    trip_ingestion_names = {f.name for f in dc_fields(cons.TripTableIngestionFields)}
+    vehicle_raw_names = {f.name for f in dc_fields(cons.VehicleTableRawFields)}
     vehicle_ingestion_names = {
-        name for name in vars(cons.VehicleTableIngestionFields) if name.isupper()
+        f.name for f in dc_fields(cons.VehicleTableIngestionFields)
     }
 
     assert trip_raw_names <= trip_ingestion_names
     assert vehicle_raw_names <= vehicle_ingestion_names
 
 
-def test_field_groups_expose_uppercase_key_accessors():
-    assert cons.TripTableRawFields.TRIP_ID_KEY == "trip_id"
-    assert cons.TripTableRawFields.FEED_TIMESTAMP_KEY == "timestamp"
-    assert (
-        cons.TripTableIngestionFields.TRIP_ID_KEY
-        == cons.TripTableIngestionFields.TRIP_ID
-    )
-    assert cons.VehicleTableRawFields.VEHICLE_LABEL_KEY == "label"
+def test_field_groups_expose_field_values_as_snake_case():
+    assert cons.TripTableIngestionFields.trip_id == "trip_id"
+    assert cons.TripTableIngestionFields.feed_timestamp == "feed_timestamp"
+    assert cons.VehicleTableIngestionFields.vehicle_label == "vehicle_label"
+    assert cons.TripTableRawFields.feed_timestamp == "header.timestamp"
 
 
-def test_field_groups_reject_lowercase_key_accessors():
+def test_field_groups_reject_unknown_attributes():
     try:
-        cons.TripTableRawFields.trip_id_key
+        cons.TripTableRawFields.nonexistent_field
     except AttributeError:
         pass
     else:
-        raise AssertionError("Lowercase *_key accessors should not be supported")
+        raise AssertionError("Unknown attributes should raise AttributeError")

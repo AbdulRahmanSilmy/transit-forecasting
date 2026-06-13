@@ -14,7 +14,7 @@ import logging
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple
 
 import mysql.connector
 import pandas as pd
@@ -187,8 +187,8 @@ class DataIngestion(ABC):
             cons.DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY
         ]
         self._delete_ingestion_columns = [
-            self.INGESTION_FIELDS.TRIP_START_TIME,
-            self.INGESTION_FIELDS.TRIP_START_DATE,
+            self.INGESTION_FIELDS.trip_start_time,
+            self.INGESTION_FIELDS.trip_start_date,
         ]
         self._ordered_ingestion_columns = self._get_ordered_ingestion_columns(
             self.INGESTION_FIELDS, self._delete_ingestion_columns
@@ -295,13 +295,11 @@ class DataIngestion(ABC):
         fields = self.INGESTION_FIELDS
 
         if (
-            fields.TRIP_START_TIME_KEY in df_feed.columns
-            and fields.TRIP_START_DATE_KEY in df_feed.columns
+            fields.trip_start_time in df_feed.columns
+            and fields.trip_start_date in df_feed.columns
         ):
-            df_feed[fields.TRIP_START_TIMESTAMP_KEY] = pd.to_datetime(
-                df_feed[fields.TRIP_START_DATE_KEY]
-                + " "
-                + df_feed[fields.TRIP_START_TIME_KEY],
+            df_feed[fields.trip_start_timestamp] = pd.to_datetime(
+                df_feed[fields.trip_start_date] + " " + df_feed[fields.trip_start_time],
                 format=cons.TRIP_START_TIMESTAMP_FORMAT,
                 errors="coerce",
             )
@@ -371,31 +369,25 @@ class DataIngestion(ABC):
             Flattened row dictionaries keyed by ingestion column names.
         """
         paths: dict = {}
-        for name in vars(self.RAW_FIELDS):
-            if not name.isupper():
-                continue
-            column = getattr(self.INGESTION_FIELDS, name, None)
+        for f in cons.dataclass_fields(self.RAW_FIELDS):
+            column = getattr(self.INGESTION_FIELDS, f.name, None)
             if column is None:
                 continue
-            paths[column] = getattr(self.RAW_FIELDS, name)
+            paths[column] = getattr(self.RAW_FIELDS, f.name)
 
         return self._resolve_paths(feed, paths)
 
     @staticmethod
     def _get_ordered_ingestion_columns(
-        ingestion_fields: Union[
-            cons._TripIngestionFields, cons._VehicleIngestionFields
-        ],
+        ingestion_fields,
         delete_list: list[str],
     ) -> List[str]:
         """Return ingestion column names in declaration order."""
-        col_list = []
-        for name in vars(ingestion_fields):
-            value = getattr(ingestion_fields, name)
-            if name.isupper() and value not in delete_list:
-                col_list.append(value)
-
-        return col_list
+        return [
+            getattr(ingestion_fields, f.name)
+            for f in cons.dataclass_fields(ingestion_fields)
+            if getattr(ingestion_fields, f.name) not in delete_list
+        ]
 
     def _prepare_insert_rows(self, df_feed: pd.DataFrame) -> List[tuple]:
         """Build SQL insert tuples using ingestion-field column order."""
@@ -642,9 +634,9 @@ class VehicleUpdatesDataIngestion(DataIngestion):
             connection_params=connection_params,
             data_ingestion_params=data_ingestion_params,
             time_columns=[
-                cons.VehicleTableIngestionFields.FEED_TIMESTAMP,
-                cons.VehicleTableIngestionFields.TIMESTAMP,
-                cons.VehicleTableIngestionFields.TRIP_START_TIMESTAMP,
+                cons.VehicleTableIngestionFields.feed_timestamp,
+                cons.VehicleTableIngestionFields.timestamp,
+                cons.VehicleTableIngestionFields.trip_start_timestamp,
             ],
         )
 
@@ -670,7 +662,7 @@ class VehicleUpdatesDataIngestion(DataIngestion):
             timestamp included if it is newer than the existing record for that vehicle.
         """
         fields = cons.VehicleTableIngestionFields
-        vehicle_id = entity.get(fields.VEHICLE_ID)
+        vehicle_id = entity.get(fields.vehicle_id)
 
         if vehicle_id is None:
             return False, latest_update
@@ -678,11 +670,11 @@ class VehicleUpdatesDataIngestion(DataIngestion):
         cond = vehicle_id not in latest_update
         cond |= (
             vehicle_id in latest_update
-            and entity[fields.TIMESTAMP] > latest_update[vehicle_id]
+            and entity[fields.timestamp] > latest_update[vehicle_id]
         )
 
         if cond:
-            latest_update[vehicle_id] = entity[fields.TIMESTAMP]
+            latest_update[vehicle_id] = entity[fields.timestamp]
 
         return cond, latest_update
 
@@ -718,10 +710,10 @@ class TripUpdatesDataIngestion(DataIngestion):
             connection_params=connection_params,
             data_ingestion_params=data_ingestion_params,
             time_columns=[
-                cons.TripTableIngestionFields.FEED_TIMESTAMP,
-                cons.TripTableIngestionFields.ARRIVAL_TIME,
-                cons.TripTableIngestionFields.DEPARTURE_TIME,
-                cons.TripTableIngestionFields.TRIP_START_TIMESTAMP,
+                cons.TripTableIngestionFields.feed_timestamp,
+                cons.TripTableIngestionFields.arrival_time,
+                cons.TripTableIngestionFields.departure_time,
+                cons.TripTableIngestionFields.trip_start_timestamp,
             ],
         )
 
@@ -749,16 +741,16 @@ class TripUpdatesDataIngestion(DataIngestion):
 
         fields = cons.TripTableIngestionFields
         check_cols = [
-            fields.ARRIVAL_DELAY,
-            fields.ARRIVAL_TIME,
-            fields.ARRIVAL_UNCERTAINTY,
-            fields.DEPARTURE_DELAY,
-            fields.DEPARTURE_TIME,
-            fields.DEPARTURE_UNCERTAINTY,
+            fields.arrival_delay,
+            fields.arrival_time,
+            fields.arrival_uncertainty,
+            fields.departure_delay,
+            fields.departure_time,
+            fields.departure_uncertainty,
         ]
 
-        trip_id = entity.get(fields.TRIP_ID)
-        stop_id = entity.get(fields.STOP_ID)
+        trip_id = entity.get(fields.trip_id)
+        stop_id = entity.get(fields.stop_id)
         cond = False
 
         # If we don't have valid identifiers, we cannot reliably deduplicate.
