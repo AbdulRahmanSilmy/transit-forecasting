@@ -41,6 +41,14 @@ TRIP_UPDATES_KEY = "trip_updates"
 VEHICLE_UPDATE_TABLE = "TRANSIT_VEHICLE_TABLE"
 TRIP_UPDATE_TABLE = "TRANSIT_TRIP_TABLE"
 
+# SQL metadata column names used by create-table templates.
+ID_KEY = "id"
+READ_TIMESTAMP_KEY = "read_timestamp"
+
+# Shared ingestion transform settings
+TRIP_START_TIMESTAMP_FORMAT = "%Y%m%d %H:%M:%S"
+UNIX_TIMESTAMP_UNIT = "s"
+
 
 @dataclass(frozen=True)
 class _TripSharedFields:
@@ -193,29 +201,3 @@ VehicleTableIngestionFields = _build_ingestion_fields(
 
 _validate_ingestion_fields(TripTableRawFields, TripTableIngestionFields)
 _validate_ingestion_fields(VehicleTableRawFields, VehicleTableIngestionFields)
-
-
-ID_KEY = "id"
-READ_TIMESTAMP_KEY = "read_timestamp"
-
-# Raw GTFS feed object keys shared by both update types
-HEADER_KEY = "header"
-ENTITY_KEY = "entity"
-
-# Raw GTFS feed object keys used by vehicle updates
-VEHICLE_KEY = "vehicle"
-TRIP_KEY = "trip"
-POSITION_KEY = "position"
-
-# Raw GTFS feed object keys used by trip updates
-TRIP_UPDATE_KEY = "trip_update"
-STOP_TIME_UPDATE_KEY = "stop_time_update"
-ARRIVAL_KEY = "arrival"
-DEPARTURE_KEY = "departure"
-DELAY_KEY = "delay"
-TIME_KEY = "time"
-UNCERTAINTY_KEY = "uncertainty"
-
-# Shared ingestion transform settings
-TRIP_START_TIMESTAMP_FORMAT = "%Y%m%d %H:%M:%S"
-UNIX_TIMESTAMP_UNIT = "s"
