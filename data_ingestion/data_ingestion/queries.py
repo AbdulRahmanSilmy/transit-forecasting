@@ -32,7 +32,12 @@ def _cons_map() -> dict:
         Mapping from uppercase constant name (str) to its value (Any).
     """
 
-    return {k: v for k, v in cons.__dict__.items() if k.isupper()}
+    mapping = {k: v for k, v in cons.__dict__.items() if k.isupper()}
+    mapping["VehicleTableIngestionFields"] = cons.VehicleTableIngestionFields
+    mapping["VehicleTableRawFields"] = cons.VehicleTableRawFields
+    mapping["TripTableIngestionFields"] = cons.TripTableIngestionFields
+    mapping["TripTableRawFields"] = cons.TripTableRawFields
+    return mapping
 
 
 def _load_and_format(filename: str) -> str:

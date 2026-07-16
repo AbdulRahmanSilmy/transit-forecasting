@@ -1,8 +1,8 @@
 INSERT INTO {VEHICLE_UPDATE_TABLE} (
-    {FEED_TIMESTAMP_KEY}, {ENTITY_ID_KEY}, {TRIP_ID_KEY}, {TRIP_SCHEDULE_RELATIONSHIP_KEY},
-    {TRIP_ROUTE_ID_KEY}, {TRIP_DIRECTION_ID_KEY}, {POSITION_LATITUDE_KEY}, {POSITION_LONGITUDE_KEY},
-    {POSITION_BEARING_KEY}, {POSITION_ODOMETER_KEY}, {POSITION_SPEED_KEY}, {CURRENT_STOP_SEQUENCE_KEY},
-    {CURRENT_STATUS_KEY}, {TIMESTAMP_KEY}, {CONGESTION_LEVEL_KEY}, {STOP_ID_KEY}, {VEHICLE_ID_KEY},
-    {VEHICLE_LABEL_KEY}, {TRIP_START_TIMESTAMP_KEY}
+    {VehicleTableIngestionFields.feed_timestamp}, {VehicleTableIngestionFields.entity_id}, {VehicleTableIngestionFields.trip_id}, {VehicleTableIngestionFields.trip_schedule_relationship},
+    {VehicleTableIngestionFields.trip_route_id}, {VehicleTableIngestionFields.trip_direction_id}, {VehicleTableIngestionFields.position_latitude}, {VehicleTableIngestionFields.position_longitude},
+    {VehicleTableIngestionFields.position_bearing}, {VehicleTableIngestionFields.position_odometer}, {VehicleTableIngestionFields.position_speed}, {VehicleTableIngestionFields.current_stop_sequence},
+    {VehicleTableIngestionFields.current_status}, {VehicleTableIngestionFields.timestamp}, {VehicleTableIngestionFields.congestion_level}, {VehicleTableIngestionFields.stop_id}, {VehicleTableIngestionFields.vehicle_id},
+    {VehicleTableIngestionFields.vehicle_label}, {VehicleTableIngestionFields.trip_start_timestamp}
 )
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)

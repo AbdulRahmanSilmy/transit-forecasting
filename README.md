@@ -31,7 +31,7 @@ pre-commit install
 ```
 
 ## Data Ingestion
-The ingestion scripts live under [data_ingestion/](data_ingestion) and use [data_ingestion/config.yaml](data_ingestion/config.yaml) for configuration.
+The ingestion scripts live under [data_ingestion/](data_ingestion), and [data_ingestion/config.yaml](data_ingestion/config.yaml) defines the configuration. It pulls environmental variables from a `.env` file. To run the code, use [.env.example](data_ingestion/.env.example) as a reference for what to include in your `.env` file.
 
 ### Docker
 The Docker Compose file is in [data_ingestion/docker-compose.yml](data_ingestion/docker-compose.yml). Run it from the `data_ingestion` directory:

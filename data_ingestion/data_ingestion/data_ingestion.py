@@ -13,6 +13,7 @@ The following are currently populated tables and their respective classes:
 import logging
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from typing import Dict, List, Tuple
 
 import mysql.connector
@@ -78,24 +79,43 @@ def parse_gtfs_data(data: bytes):
     return feed
 
 
-def get_field(obj, field):
+def get_field(feed, key, default=None):
     """
-    Safely retrieve an attribute from an object, returning ``None`` if missing.
+    Safely retrieve an attribute from an object using optional dotted paths.
 
     Parameters
     ----------
-    obj : object
+    feed : object
         The object to access.
 
-    field : str
-        The attribute name to retrieve.
+    key : str
+        The attribute name or dotted attribute path to retrieve.
+
+    default : Any, optional
+        The value to return if any attribute in the path is not found.
+        Defaults to ``None``.
 
     Returns
     -------
     Any
-        The attribute value if present; otherwise ``None``.
+        The resolved attribute value if present; otherwise ``default``.
+
+    Notes
+    -----
+    If ``key`` contains ``.`` separators, each segment is resolved in order
+    using ``getattr``. If any segment is missing, the function returns
+    ``default`` immediately.
     """
-    return getattr(obj, field, None)
+    keys = key.split(".")
+    if len(keys) == 1:
+        return getattr(feed, key, default)
+    else:
+        value = feed
+        for k in keys:
+            value = getattr(value, k, default)
+            if value is None:
+                return default
+        return value
 
 
 class DataIngestion(ABC):
@@ -130,6 +150,8 @@ class DataIngestion(ABC):
     CREATE_TABLE_QUERY: str = None
     INSERT_QUERY: str = None
     TABLE_NAME: str = None
+    RAW_FIELDS = None
+    INGESTION_FIELDS = None
 
     def __init_subclass__(cls):
         """Require concrete subclasses to define SQL and table metadata."""
@@ -140,6 +162,10 @@ class DataIngestion(ABC):
             raise TypeError(f"{cls.__name__} must define 'INSERT_QUERY'")
         if cls.TABLE_NAME is None:
             raise TypeError(f"{cls.__name__} must define 'TABLE_NAME'")
+        if cls.RAW_FIELDS is None:
+            raise TypeError(f"{cls.__name__} must define 'RAW_FIELDS'")
+        if cls.INGESTION_FIELDS is None:
+            raise TypeError(f"{cls.__name__} must define 'INGESTION_FIELDS'")
 
     def __init__(
         self,
@@ -160,26 +186,75 @@ class DataIngestion(ABC):
         self.connection_retry_delay_seconds = self.data_ingestion_params[
             cons.DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY
         ]
+        self._delete_ingestion_columns = [
+            self.INGESTION_FIELDS.trip_start_time,
+            self.INGESTION_FIELDS.trip_start_date,
+        ]
+        self._ordered_ingestion_columns = self._get_ordered_ingestion_columns(
+            self.INGESTION_FIELDS, self._delete_ingestion_columns
+        )
 
     @staticmethod
-    @abstractmethod
-    def _get_dicts_from_feed(header, entity) -> List[dict]:
+    def _resolve_paths(obj, paths_map: dict) -> List[dict]:
         """
-        Convert a feed entity into one or more dictionary rows.
+        Resolve dot-delimited field paths against a protobuf object.
+
+        Groups paths by their first segment and recurses into each sub-object.
+        Repeated (iterable) sub-objects are expanded so that one output row is
+        produced per element; scalar sub-objects contribute their fields to
+        every row accumulated so far.
 
         Parameters
         ----------
-        header : google.transit.gtfs_realtime_pb2.FeedHeader
-            The feed header object containing metadata for the feed.
+        obj : object
+            The protobuf object to resolve paths against.
 
-        entity : google.transit.gtfs_realtime_pb2.FeedEntity
-            The feed entity to convert into one or more row dictionaries.
+        paths_map : dict
+            Mapping of ``{ingestion_column: dot_delimited_path}`` where the
+            paths are relative to ``obj`` (leading prefix already stripped).
 
         Returns
         -------
         list[dict]
-            One or more dictionaries representing flattened rows extracted from the entity.
+            One dict per expanded row.
         """
+        groups: dict = {}
+        leaf_values: dict = {}
+
+        for column, path in paths_map.items():
+            if "." in path:
+                first, rest = path.split(".", 1)
+                groups.setdefault(first, {})[column] = rest
+            else:
+                leaf_values[column] = getattr(obj, path, None)
+
+        result: List[dict] = [dict(leaf_values)]
+
+        for segment, sub_paths in groups.items():
+            sub_obj = getattr(obj, segment, None)
+            if sub_obj is None:
+                for row in result:
+                    for column in sub_paths:
+                        row[column] = None
+                continue
+
+            if isinstance(sub_obj, Iterable) and not isinstance(sub_obj, (str, bytes)):
+                expanded: List[dict] = []
+                for item in sub_obj:
+                    sub_rows = DataIngestion._resolve_paths(item, sub_paths)
+                    for sub_row in sub_rows:
+                        for base_row in result:
+                            expanded.append({**base_row, **sub_row})
+                result = expanded
+            else:
+                sub_rows = DataIngestion._resolve_paths(sub_obj, sub_paths)
+                merged: List[dict] = []
+                for base_row in result:
+                    for sub_row in sub_rows:
+                        merged.append({**base_row, **sub_row})
+                result = merged
+
+        return result
 
     @staticmethod
     @abstractmethod
@@ -217,14 +292,14 @@ class DataIngestion(ABC):
         pandas.DataFrame
             A transformed DataFrame with properly-typed columns ready for DB insert.
         """
+        fields = self.INGESTION_FIELDS
+
         if (
-            cons.TRIP_START_TIME_KEY in df_feed.columns
-            and cons.TRIP_START_DATE_KEY in df_feed.columns
+            fields.trip_start_time in df_feed.columns
+            and fields.trip_start_date in df_feed.columns
         ):
-            df_feed[cons.TRIP_START_TIMESTAMP_KEY] = pd.to_datetime(
-                df_feed[cons.TRIP_START_DATE_KEY]
-                + " "
-                + df_feed[cons.TRIP_START_TIME_KEY],
+            df_feed[fields.trip_start_timestamp] = pd.to_datetime(
+                df_feed[fields.trip_start_date] + " " + df_feed[fields.trip_start_time],
                 format=cons.TRIP_START_TIMESTAMP_FORMAT,
                 errors="coerce",
             )
@@ -233,10 +308,9 @@ class DataIngestion(ABC):
         for col in process_cols.index:
             df_feed[col] = df_feed[col].apply(lambda x: x if x != "" else None)
 
-        if cons.TRIP_START_TIME_KEY in df_feed.columns:
-            del df_feed[cons.TRIP_START_TIME_KEY]
-        if cons.TRIP_START_DATE_KEY in df_feed.columns:
-            del df_feed[cons.TRIP_START_DATE_KEY]
+        for col in self._delete_ingestion_columns:
+            if col in df_feed.columns:
+                del df_feed[col]
 
         for col in self._time_columns:
             if col in df_feed.columns:
@@ -278,25 +352,58 @@ class DataIngestion(ABC):
 
     def _extract_feed_info(self, feed) -> List[Dict]:
         """
-        Convert a FeedEntity to a dictionary, handling missing fields gracefully.
+        Convert a feed object into flattened row dictionaries.
 
-        Parameters:
-        -----------
-        feed: gtfs_realtime_pb2.Feed
-            The Feed to convert.
+        Resolves all field paths declared in ``RAW_FIELDS`` against ``feed``,
+        mapping them to ``INGESTION_FIELDS`` column names and expanding any
+        repeated sub-objects into individual rows.
+
+        Parameters
+        ----------
+        feed : gtfs_realtime_pb2.FeedMessage
+            Feed object to convert.
 
         Returns
         -------
         list[dict]
-            A list of dictionary representations of the FeedEntities.
+            Flattened row dictionaries keyed by ingestion column names.
         """
-        header = get_field(feed, cons.HEADER_KEY)
-        list_entity = get_field(feed, cons.ENTITY_KEY)
-        list_dict_entities = []
-        for entity in list_entity:
-            list_dict_entities.extend(self._get_dicts_from_feed(header, entity))
+        paths: dict = {}
+        for f in cons.dataclass_fields(self.RAW_FIELDS):
+            column = getattr(self.INGESTION_FIELDS, f.name, None)
+            if column is None:
+                continue
+            paths[column] = getattr(self.RAW_FIELDS, f.name)
 
-        return list_dict_entities
+        return self._resolve_paths(feed, paths)
+
+    @staticmethod
+    def _get_ordered_ingestion_columns(
+        ingestion_fields,
+        delete_list: list[str],
+    ) -> List[str]:
+        """Return ingestion column names in declaration order."""
+        return [
+            getattr(ingestion_fields, f.name)
+            for f in cons.dataclass_fields(ingestion_fields)
+            if getattr(ingestion_fields, f.name) not in delete_list
+        ]
+
+    def _prepare_insert_rows(self, df_feed: pd.DataFrame) -> List[tuple]:
+        """Build SQL insert tuples using ingestion-field column order."""
+
+        missing_columns = [
+            col for col in self._ordered_ingestion_columns if col not in df_feed.columns
+        ]
+        if missing_columns:
+            raise ValueError(
+                "Missing expected ingestion columns in DataFrame: "
+                + ", ".join(missing_columns)
+            )
+
+        return list(
+            df_feed[self._ordered_ingestion_columns].itertuples(index=False, name=None)
+        )
 
     def _get_df_feed(
         self, list_dict_entities: List[dict], latest_updates: dict
@@ -410,25 +517,25 @@ class DataIngestion(ABC):
         """
         if data:
             feed = parse_gtfs_data(data)
-            entities = self._extract_feed_info(feed)
+            list_dict_entities = self._extract_feed_info(feed)
             logger.info(
-                "%s: Feed retrieved with %d entities.",
+                "%s: Feed retrieved with %d rows.",
                 self.TABLE_NAME,
-                len(feed.entity),
+                len(list_dict_entities),
             )
 
             df_feed, self._latest_update = self._get_df_feed(
-                entities, self._latest_update
+                list_dict_entities, self._latest_update
             )
 
             if not df_feed.empty:
                 df_feed = self._format_df_feed(df_feed)
 
-                # Convert DataFrame to list of tuples
-                data_to_insert = [tuple(row)[1:] for row in df_feed.itertuples()]
+                # Build tuples in deterministic SQL column order.
+                data_to_insert = self._prepare_insert_rows(df_feed)
 
                 logger.info(
-                    "%s: Inserting %d rows into the database...",
+                    "%s: Inserting %d unique rows into the database...",
                     self.TABLE_NAME,
                     len(data_to_insert),
                 )
@@ -519,71 +626,19 @@ class VehicleUpdatesDataIngestion(DataIngestion):
     CREATE_TABLE_QUERY = sql_queries.VEHICLE_UPDATES_CREATE_TABLE_QUERY
     INSERT_QUERY = sql_queries.VEHICLE_UPDATES_INSERT_QUERY
     TABLE_NAME = cons.VEHICLE_UPDATE_TABLE
+    RAW_FIELDS = cons.VehicleTableRawFields
+    INGESTION_FIELDS = cons.VehicleTableIngestionFields
 
     def __init__(self, connection_params: dict, data_ingestion_params: dict):
         super().__init__(
             connection_params=connection_params,
             data_ingestion_params=data_ingestion_params,
             time_columns=[
-                cons.FEED_TIMESTAMP_KEY,
-                cons.TIMESTAMP_KEY,
-                cons.TRIP_START_TIMESTAMP_KEY,
+                cons.VehicleTableIngestionFields.feed_timestamp,
+                cons.VehicleTableIngestionFields.timestamp,
+                cons.VehicleTableIngestionFields.trip_start_timestamp,
             ],
         )
-
-    @staticmethod
-    def _get_dicts_from_feed(header, entity) -> List[Dict]:
-        """
-        Convert a FeedEntity to a dictionary, handling missing fields gracefully.
-
-        Parameters:
-        -----------
-        header: gtfs_realtime_pb2.FeedHeader
-            The FeedHeader containing metadata about the feed.
-
-        entity: gtfs_realtime_pb2.FeedEntity
-            The FeedEntity to convert.
-
-        Returns
-        -------
-        list[dict]
-            A list of dictionary representations of the FeedEntity.
-        """
-        vehicle = get_field(entity, cons.VEHICLE_KEY)
-        trip = get_field(vehicle, cons.TRIP_KEY)
-        position = get_field(vehicle, cons.POSITION_KEY)
-        vehicle_info = get_field(vehicle, cons.VEHICLE_KEY)
-
-        return [
-            {
-                cons.FEED_TIMESTAMP_KEY: get_field(header, cons.TIMESTAMP_KEY),
-                cons.ENTITY_ID_KEY: get_field(entity, cons.ID_KEY),
-                cons.TRIP_ID_KEY: get_field(trip, cons.TRIP_ID_KEY),
-                cons.TRIP_START_TIME_KEY: get_field(trip, cons.TRIP_START_TIME_KEY),
-                cons.TRIP_START_DATE_KEY: get_field(trip, cons.TRIP_START_DATE_KEY),
-                cons.TRIP_SCHEDULE_RELATIONSHIP_KEY: get_field(
-                    trip, cons.SCHEDULE_RELATIONSHIP_KEY
-                ),
-                cons.TRIP_ROUTE_ID_KEY: get_field(trip, cons.TRIP_ROUTE_ID_KEY),
-                cons.TRIP_DIRECTION_ID_KEY: get_field(trip, cons.DIRECTION_ID_KEY),
-                cons.POSITION_LATITUDE_KEY: get_field(position, cons.LATITUDE_KEY),
-                cons.POSITION_LONGITUDE_KEY: get_field(position, cons.LONGITUDE_KEY),
-                cons.POSITION_BEARING_KEY: get_field(position, cons.BEARING_KEY),
-                cons.POSITION_ODOMETER_KEY: get_field(position, cons.ODOMETER_KEY),
-                cons.POSITION_SPEED_KEY: get_field(position, cons.SPEED_KEY),
-                cons.CURRENT_STOP_SEQUENCE_KEY: get_field(
-                    vehicle, cons.CURRENT_STOP_SEQUENCE_KEY
-                ),
-                cons.CURRENT_STATUS_KEY: get_field(vehicle, cons.CURRENT_STATUS_KEY),
-                cons.TIMESTAMP_KEY: get_field(vehicle, cons.TIMESTAMP_KEY),
-                cons.CONGESTION_LEVEL_KEY: get_field(
-                    vehicle, cons.CONGESTION_LEVEL_KEY
-                ),
-                cons.STOP_ID_KEY: get_field(vehicle, cons.STOP_ID_KEY),
-                cons.VEHICLE_ID_KEY: get_field(vehicle_info, cons.ID_KEY),
-                cons.VEHICLE_LABEL_KEY: get_field(vehicle_info, cons.LABEL_KEY),
-            }
-        ]
 
     @staticmethod
     def _check_duplicate_entity(entity, latest_update) -> Tuple[bool, Dict]:
@@ -606,7 +661,8 @@ class VehicleUpdatesDataIngestion(DataIngestion):
             Updated tracking state for latest vehicle timestamps, with the current entity's
             timestamp included if it is newer than the existing record for that vehicle.
         """
-        vehicle_id = entity.get(cons.VEHICLE_ID_KEY)
+        fields = cons.VehicleTableIngestionFields
+        vehicle_id = entity.get(fields.vehicle_id)
 
         if vehicle_id is None:
             return False, latest_update
@@ -614,11 +670,11 @@ class VehicleUpdatesDataIngestion(DataIngestion):
         cond = vehicle_id not in latest_update
         cond |= (
             vehicle_id in latest_update
-            and entity[cons.TIMESTAMP_KEY] > latest_update[vehicle_id]
+            and entity[fields.timestamp] > latest_update[vehicle_id]
         )
 
         if cond:
-            latest_update[vehicle_id] = entity[cons.TIMESTAMP_KEY]
+            latest_update[vehicle_id] = entity[fields.timestamp]
 
         return cond, latest_update
 
@@ -646,80 +702,20 @@ class TripUpdatesDataIngestion(DataIngestion):
     CREATE_TABLE_QUERY = sql_queries.TRIP_UPDATES_CREATE_TABLE_QUERY
     INSERT_QUERY = sql_queries.TRIP_UPDATES_INSERT_QUERY
     TABLE_NAME = cons.TRIP_UPDATE_TABLE
+    RAW_FIELDS = cons.TripTableRawFields
+    INGESTION_FIELDS = cons.TripTableIngestionFields
 
     def __init__(self, connection_params: dict, data_ingestion_params: dict):
         super().__init__(
             connection_params=connection_params,
             data_ingestion_params=data_ingestion_params,
             time_columns=[
-                cons.FEED_TIMESTAMP_KEY,
-                cons.ARRIVAL_TIME_KEY,
-                cons.DEPARTURE_TIME_KEY,
-                cons.TRIP_START_TIMESTAMP_KEY,
+                cons.TripTableIngestionFields.feed_timestamp,
+                cons.TripTableIngestionFields.arrival_time,
+                cons.TripTableIngestionFields.departure_time,
+                cons.TripTableIngestionFields.trip_start_timestamp,
             ],
         )
-
-    @staticmethod
-    def _get_dicts_from_feed(header, entity) -> List[Dict]:
-        """
-        Convert a FeedEntity to a dictionary, handling missing fields gracefully.
-
-        Parameters:
-        -----------
-        header: gtfs_realtime_pb2.FeedHeader
-            The FeedHeader containing metadata about the feed.
-
-        entity: gtfs_realtime_pb2.FeedEntity
-            The FeedEntity to convert.
-
-        Returns
-        -------
-        list[dict]
-            A list of dictionary representations of the FeedEntity.
-        """
-        trip_update = get_field(entity, cons.TRIP_UPDATE_KEY)
-        trip = get_field(trip_update, cons.TRIP_KEY)
-        stop_time_update = get_field(trip_update, cons.STOP_TIME_UPDATE_KEY)
-        base_dict = {
-            cons.FEED_TIMESTAMP_KEY: get_field(header, cons.TIMESTAMP_KEY),
-            cons.TRIP_ID_KEY: get_field(trip, cons.TRIP_ID_KEY),
-            cons.TRIP_START_TIME_KEY: get_field(trip, cons.TRIP_START_TIME_KEY),
-            cons.TRIP_START_DATE_KEY: get_field(trip, cons.TRIP_START_DATE_KEY),
-            cons.TRIP_SCHEDULE_RELATIONSHIP_KEY: get_field(
-                trip, cons.SCHEDULE_RELATIONSHIP_KEY
-            ),
-            cons.TRIP_ROUTE_ID_KEY: get_field(trip, cons.TRIP_ROUTE_ID_KEY),
-            cons.TRIP_DIRECTION_ID_KEY: get_field(trip, cons.DIRECTION_ID_KEY),
-        }
-        list_dicts = []
-        if not stop_time_update:
-            return list_dicts
-        for stu in stop_time_update:
-            dict_str = base_dict.copy()
-            arrival = get_field(stu, cons.ARRIVAL_KEY)
-            departure = get_field(stu, cons.DEPARTURE_KEY)
-            dict_str.update(
-                {
-                    cons.STOP_SEQUENCE_KEY: get_field(stu, cons.STOP_SEQUENCE_KEY),
-                    cons.STOP_ID_KEY: get_field(stu, cons.STOP_ID_KEY),
-                    cons.SCHEDULE_RELATIONSHIP_KEY: get_field(
-                        stu, cons.SCHEDULE_RELATIONSHIP_KEY
-                    ),
-                    cons.ARRIVAL_DELAY_KEY: get_field(arrival, cons.DELAY_KEY),
-                    cons.ARRIVAL_TIME_KEY: get_field(arrival, cons.TIME_KEY),
-                    cons.ARRIVAL_UNCERTAINTY_KEY: get_field(
-                        arrival, cons.UNCERTAINTY_KEY
-                    ),
-                    cons.DEPARTURE_DELAY_KEY: get_field(departure, cons.DELAY_KEY),
-                    cons.DEPARTURE_TIME_KEY: get_field(departure, cons.TIME_KEY),
-                    cons.DEPARTURE_UNCERTAINTY_KEY: get_field(
-                        departure, cons.UNCERTAINTY_KEY
-                    ),
-                }
-            )
-            list_dicts.append(dict_str)
-
-        return list_dicts
 
     @staticmethod
     def _check_duplicate_entity(entity, latest_update) -> Tuple[bool, Dict]:
@@ -743,17 +739,18 @@ class TripUpdatesDataIngestion(DataIngestion):
             snapshot included if it is newer than the existing record for that trip/stop.
         """
 
+        fields = cons.TripTableIngestionFields
         check_cols = [
-            cons.ARRIVAL_DELAY_KEY,
-            cons.ARRIVAL_TIME_KEY,
-            cons.ARRIVAL_UNCERTAINTY_KEY,
-            cons.DEPARTURE_DELAY_KEY,
-            cons.DEPARTURE_TIME_KEY,
-            cons.DEPARTURE_UNCERTAINTY_KEY,
+            fields.arrival_delay,
+            fields.arrival_time,
+            fields.arrival_uncertainty,
+            fields.departure_delay,
+            fields.departure_time,
+            fields.departure_uncertainty,
         ]
 
-        trip_id = entity.get(cons.TRIP_ID_KEY)
-        stop_id = entity.get(cons.STOP_ID_KEY)
+        trip_id = entity.get(fields.trip_id)
+        stop_id = entity.get(fields.stop_id)
         cond = False
 
         # If we don't have valid identifiers, we cannot reliably deduplicate.

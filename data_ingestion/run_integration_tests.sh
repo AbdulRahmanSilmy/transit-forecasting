@@ -15,7 +15,7 @@ fi
 
 set +e
 docker compose --profile test run --rm integration_tests
-test_exit_code=$?
+compose_test_exit_code=$?
 set -e
 
 # Only remove mysql if we started it in this script.
@@ -23,4 +23,8 @@ if [[ $started_mysql -eq 1 ]]; then
   docker compose rm -sf mysql
 fi
 
-exit "$test_exit_code"
+if [[ $compose_test_exit_code -ne 0 ]]; then
+  exit "$compose_test_exit_code"
+fi
+
+exit 0
