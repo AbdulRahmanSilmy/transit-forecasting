@@ -120,6 +120,26 @@ def _build_trip_feed_bytes() -> bytes:
     return feed.SerializeToString()
 
 
+def _index_exists(conn, database_name: str, table_name: str, index_name: str) -> bool:
+    """Return whether an index exists on a table."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT 1
+            FROM INFORMATION_SCHEMA.STATISTICS
+            WHERE TABLE_SCHEMA = %s
+              AND TABLE_NAME = %s
+              AND INDEX_NAME = %s
+            LIMIT 1
+            """,
+            (database_name, table_name, index_name),
+        )
+        return cur.fetchone() is not None
+    finally:
+        cur.close()
+
+
 @pytest.mark.integration
 def test_vehicle_updates_insert_round_trip():
     _skip_if_disabled()
@@ -202,6 +222,90 @@ def test_trip_updates_insert_round_trip():
         conn.close()
 
     assert count == 4
+
+
+@pytest.mark.integration
+def test_vehicle_schema_setup_adds_feed_timestamp_index_idempotently():
+    _skip_if_disabled()
+
+    test_table = f"{cons.VEHICLE_UPDATE_TABLE}_INDEX_TEST"
+
+    ingestion = di.VehicleUpdatesDataIngestion(
+        connection_params=_get_connection_params(),
+        data_ingestion_params={
+            cons.DIP_INGESTION_URL_KEY: "http://example.com/vehicle.pb",
+            cons.DIP_FETCH_DELAY_SECONDS_KEY: 1,
+            cons.DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY: 1,
+        },
+    )
+    ingestion.TABLE_NAME = test_table
+
+    conn = mysql.connector.connect(**ingestion.connection_params)
+    cur = conn.cursor()
+    try:
+        create_query = ingestion.CREATE_TABLE_QUERY.replace(
+            cons.VEHICLE_UPDATE_TABLE, test_table
+        )
+        cur.execute(create_query)
+        conn.commit()
+
+        # Run twice to verify idempotency of the index migration.
+        ingestion._create_table_if_not_exists(conn, cur)
+        ingestion._create_table_if_not_exists(conn, cur)
+
+        assert _index_exists(
+            conn,
+            ingestion.connection_params[cons.CP_DATABASE_KEY],
+            test_table,
+            cons.INDEX_FEED_TIMESTAMP_NAME,
+        )
+    finally:
+        cur.execute(f"DROP TABLE IF EXISTS {test_table}")
+        conn.commit()
+        cur.close()
+        conn.close()
+
+
+@pytest.mark.integration
+def test_trip_schema_setup_adds_feed_timestamp_index_idempotently():
+    _skip_if_disabled()
+
+    test_table = f"{cons.TRIP_UPDATE_TABLE}_INDEX_TEST"
+
+    ingestion = di.TripUpdatesDataIngestion(
+        connection_params=_get_connection_params(),
+        data_ingestion_params={
+            cons.DIP_INGESTION_URL_KEY: "http://example.com/trip.pb",
+            cons.DIP_FETCH_DELAY_SECONDS_KEY: 1,
+            cons.DIP_CONNECTION_RETRY_DELAY_SECONDS_KEY: 1,
+        },
+    )
+    ingestion.TABLE_NAME = test_table
+
+    conn = mysql.connector.connect(**ingestion.connection_params)
+    cur = conn.cursor()
+    try:
+        create_query = ingestion.CREATE_TABLE_QUERY.replace(
+            cons.TRIP_UPDATE_TABLE, test_table
+        )
+        cur.execute(create_query)
+        conn.commit()
+
+        # Run twice to verify idempotency of the index migration.
+        ingestion._create_table_if_not_exists(conn, cur)
+        ingestion._create_table_if_not_exists(conn, cur)
+
+        assert _index_exists(
+            conn,
+            ingestion.connection_params[cons.CP_DATABASE_KEY],
+            test_table,
+            cons.INDEX_FEED_TIMESTAMP_NAME,
+        )
+    finally:
+        cur.execute(f"DROP TABLE IF EXISTS {test_table}")
+        conn.commit()
+        cur.close()
+        conn.close()
 
 
 @pytest.mark.integration

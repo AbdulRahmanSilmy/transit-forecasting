@@ -44,6 +44,7 @@ TRIP_UPDATE_TABLE = "TRANSIT_TRIP_TABLE"
 # SQL metadata column names used by create-table templates.
 ID_KEY = "id"
 READ_TIMESTAMP_KEY = "read_timestamp"
+INDEX_FEED_TIMESTAMP_NAME = "idx_feed_timestamp"
 
 # Shared ingestion transform settings
 TRIP_START_TIMESTAMP_FORMAT = "%Y%m%d %H:%M:%S"
