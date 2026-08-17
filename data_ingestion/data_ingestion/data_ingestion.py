@@ -150,6 +150,7 @@ class DataIngestion(ABC):
     CREATE_TABLE_QUERY: str = None
     INSERT_QUERY: str = None
     TABLE_NAME: str = None
+    INDEX_DEFINITIONS: Tuple[Tuple[str, str], ...] = ()
     RAW_FIELDS = None
     INGESTION_FIELDS = None
 
@@ -166,6 +167,8 @@ class DataIngestion(ABC):
             raise TypeError(f"{cls.__name__} must define 'RAW_FIELDS'")
         if cls.INGESTION_FIELDS is None:
             raise TypeError(f"{cls.__name__} must define 'INGESTION_FIELDS'")
+        if not isinstance(cls.INDEX_DEFINITIONS, tuple):
+            raise TypeError(f"{cls.__name__} must define 'INDEX_DEFINITIONS' as tuple")
 
     def __init__(
         self,
@@ -497,8 +500,52 @@ class DataIngestion(ABC):
             Cursor object for executing queries.
         """
         cur.execute(self.CREATE_TABLE_QUERY)
+        self._ensure_required_indexes(cur)
         conn.commit()
         logger.info("%s: Ensured table exists.", self.TABLE_NAME)
+
+    @staticmethod
+    def _quote_identifier(name: str) -> str:
+        """Return a safely quoted MySQL identifier using backticks."""
+        return f"`{name.replace('`', '``')}`"
+
+    def _index_exists(self, cur, index_name: str) -> bool:
+        """Check whether a named index exists on the target table."""
+        query = """
+            SELECT 1
+            FROM INFORMATION_SCHEMA.STATISTICS
+            WHERE TABLE_SCHEMA = %s
+              AND TABLE_NAME = %s
+              AND INDEX_NAME = %s
+            LIMIT 1
+        """
+        cur.execute(
+            query,
+            (
+                self.connection_params[cons.CP_DATABASE_KEY],
+                self.TABLE_NAME,
+                index_name,
+            ),
+        )
+        return cur.fetchone() is not None
+
+    def _ensure_required_indexes(self, cur) -> None:
+        """Create missing table indexes in an idempotent way."""
+        for index_name, column_expression in self.INDEX_DEFINITIONS:
+            if self._index_exists(cur, index_name):
+                logger.info(
+                    "%s: Index '%s' already exists.", self.TABLE_NAME, index_name
+                )
+                continue
+
+            table_identifier = self._quote_identifier(self.TABLE_NAME)
+            index_identifier = self._quote_identifier(index_name)
+            alter_query = (
+                f"ALTER TABLE {table_identifier} "
+                f"ADD INDEX {index_identifier} ({column_expression})"
+            )
+            cur.execute(alter_query)
+            logger.info("%s: Created index '%s'.", self.TABLE_NAME, index_name)
 
     def _process_and_insert_data(self, data, conn, cur):
         """
@@ -626,6 +673,12 @@ class VehicleUpdatesDataIngestion(DataIngestion):
     CREATE_TABLE_QUERY = sql_queries.VEHICLE_UPDATES_CREATE_TABLE_QUERY
     INSERT_QUERY = sql_queries.VEHICLE_UPDATES_INSERT_QUERY
     TABLE_NAME = cons.VEHICLE_UPDATE_TABLE
+    INDEX_DEFINITIONS = (
+        (
+            cons.INDEX_FEED_TIMESTAMP_NAME,
+            cons.VehicleTableIngestionFields.feed_timestamp,
+        ),
+    )
     RAW_FIELDS = cons.VehicleTableRawFields
     INGESTION_FIELDS = cons.VehicleTableIngestionFields
 
@@ -702,6 +755,12 @@ class TripUpdatesDataIngestion(DataIngestion):
     CREATE_TABLE_QUERY = sql_queries.TRIP_UPDATES_CREATE_TABLE_QUERY
     INSERT_QUERY = sql_queries.TRIP_UPDATES_INSERT_QUERY
     TABLE_NAME = cons.TRIP_UPDATE_TABLE
+    INDEX_DEFINITIONS = (
+        (
+            cons.INDEX_FEED_TIMESTAMP_NAME,
+            cons.TripTableIngestionFields.feed_timestamp,
+        ),
+    )
     RAW_FIELDS = cons.TripTableRawFields
     INGESTION_FIELDS = cons.TripTableIngestionFields
 
