@@ -3,11 +3,15 @@
 ## Documentation
 - Use the NumPy docstring standard for Python functions and methods.
 
+## Python Environment
+- Run project Python code, tests, and notebooks with the `transit_env` Conda environment.
+- Activate it with `conda activate transit_env`; for non-interactive commands, use `conda run -n transit_env <command>`.
+
 ## Testing
 - Prefer pytest for tests.
 - For local validation, prefer:
-	- `pytest tests/unit -q`
-	- `./run_integration_tests.sh`
+	- `conda run -n transit_env pytest tests/unit -q`
+	- `conda run -n transit_env ./run_integration_tests.sh`
 
 ## Notes
 - Add future guidelines here.
