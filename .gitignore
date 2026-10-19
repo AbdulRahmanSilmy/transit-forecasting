@@ -7,4 +7,5 @@
 **/*.log
 *.egg-info/
 **/build/
-notebooks/
+visuals/
+notebooks/misc/
