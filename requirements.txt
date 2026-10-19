@@ -1,4 +1,5 @@
 -e data_ingestion
+-e forecasting
 matplotlib
 notebook
 jupyterlab
