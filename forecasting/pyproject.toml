@@ -8,8 +8,10 @@ version = "0.1.0"
 description = "Forecasting utilities for transit data"
 requires-python = ">=3.10"
 dependencies = [
+    "mysql-connector-python",
     "numpy",
     "pandas",
+    "shapely",
 ]
 
 [project.optional-dependencies]

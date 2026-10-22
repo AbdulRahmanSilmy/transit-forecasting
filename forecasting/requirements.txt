@@ -2,4 +2,5 @@
 scikit-learn
 ipywidgets
 jupyter
+plotly
 tqdm
