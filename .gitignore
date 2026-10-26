@@ -4,6 +4,7 @@
 **/.env
 **/.env.*
 !**/.env.example
+setup_road_segment_congestion_env.sh
 **/*.log
 *.egg-info/
 **/build/

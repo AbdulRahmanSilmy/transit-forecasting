@@ -9,5 +9,6 @@
     ],
     "python.analysis.extraPaths": [
         "./data_ingestion",
+        "./forecasting"
     ]
 }
