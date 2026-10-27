@@ -87,6 +87,21 @@ snapshots preserve DataFrame dtypes and order, but must only be loaded from
 trusted sources. All of `data/` remains ignored by Git; no credentials are
 stored in snapshots.
 
+## Congestion Maps
+
+`prepare_congestion_snapshots` selects the latest already-observed congestion
+estimate at each requested UTC timestamp. An aggregate becomes available at its
+last contributing vehicle probe, not at the start of its five-minute bin.
+History preceding the display window can initialize a frame, but estimates expire
+after `max_age` (inclusive). The notebook's provisional default is 15 minutes;
+calibrate this against actual observation gaps. Full-history engine speed
+baselines are unchanged, so this visualization is not a causal baseline backtest.
+
+`make_congestion_map` uses the same rendering for static and animated snapshots.
+The latest map and final raw animation frame share their timestamp and freshness
+settings. Hover labels show the actual observation time and age; an old estimate
+is never described as current. Neither function modifies engine results.
+
 ## Data Ingestion
 The ingestion scripts live under [data_ingestion/](data_ingestion), and [data_ingestion/config.yaml](data_ingestion/config.yaml) defines the configuration. It pulls environmental variables from a `.env` file. To run the code, use [.env.example](data_ingestion/.env.example) as a reference for what to include in your `.env` file.
 
