@@ -7,7 +7,7 @@ import plotly.colors as pc
 import plotly.graph_objects as go
 from shapely.geometry import LineString, MultiLineString
 
-from .road_segment_congestion import CongestionResult
+from .road_segment_congestion import CongestionResult, _require_columns
 
 
 def _equivalent_segments(segments: pd.DataFrame) -> pd.DataFrame:
@@ -60,6 +60,7 @@ def prepare_congestion_snapshots(
     times: pd.DatetimeIndex,
     *,
     max_age: str | pd.Timedelta = "15min",
+    service_activity: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Select fresh, already-observed estimates at each requested timestamp.
 
@@ -81,6 +82,9 @@ def prepare_congestion_snapshots(
     max_age : str or pandas.Timedelta, optional
         Positive maximum observation age, inclusive. The provisional default
         is 15 minutes; calibrate it against actual probe availability.
+    service_activity : pandas.DataFrame or None, optional
+        Output of ``get_congestion_service_activity`` for the shared selected
+        period. When omitted, schedule activity is explicitly unevaluated.
 
     Returns
     -------
@@ -91,7 +95,10 @@ def prepare_congestion_snapshots(
         retained in ``member_segment_ids`` and ``member_shape_ids``.
         Other columns include segment metadata, ``as_of``,
         ``observed_at``, ``age``, ``is_fresh``, ``last_congestion_index``, and
-        freshness-masked ``congestion_index``.
+        freshness-masked ``congestion_index``. ``status`` distinguishes fresh,
+        stale, unobserved, inactive, and unavailable-baseline records.
+        ``inactive_shape_ids`` identifies inactive members even when another
+        shape provides a fresh observation.
 
     Raises
     ------
@@ -122,6 +129,7 @@ def prepare_congestion_snapshots(
         .max()
         .rename(columns={"feed_timestamp": "observed_at"})
     )
+    probe_times["observed_at"] = pd.to_datetime(probe_times["observed_at"], utc=True)
     observations = observations.merge(
         probe_times, on=["segment_id", "time_bin"], how="left", validate="one_to_one"
     )
@@ -142,6 +150,15 @@ def prepare_congestion_snapshots(
             right_on="observed_at",
             direction="backward",
         )
+        selected = pd.merge_asof(
+            selected,
+            probe_times.loc[probe_times["segment_id"].eq(segment_id), ["observed_at"]]
+            .rename(columns={"observed_at": "last_probe_at"})
+            .sort_values("last_probe_at"),
+            left_on="as_of",
+            right_on="last_probe_at",
+            direction="backward",
+        )
         selected["segment_id"] = segment_id
         frames.append(selected)
     snapshots = pd.concat(frames, ignore_index=True)
@@ -151,13 +168,53 @@ def prepare_congestion_snapshots(
     snapshots["congestion_index"] = snapshots["congestion_index"].where(
         snapshots["is_fresh"]
     )
+    membership = _equivalent_segments(result.segments)
     snapshots = snapshots.merge(
         result.segments, on="segment_id", how="left", validate="many_to_one"
     ).merge(
-        _equivalent_segments(result.segments),
+        membership,
         on="segment_id",
         validate="many_to_one",
     )
+    snapshots["last_probe_at"] = snapshots.groupby(["as_of", "display_id"])[
+        "last_probe_at"
+    ].transform("max")
+    if service_activity is None:
+        snapshots["scheduled_trips"] = pd.Series(
+            pd.NA, index=snapshots.index, dtype="Int64"
+        )
+        snapshots["inactive_shape_ids"] = [()] * len(snapshots)
+    else:
+        _require_columns(
+            service_activity, ("segment_id", "scheduled_trips"), "service_activity"
+        )
+        service_activity = service_activity[["segment_id", "scheduled_trips"]].copy()
+        service_activity["scheduled_trips"] = pd.to_numeric(
+            service_activity["scheduled_trips"], errors="raise"
+        )
+        if (
+            service_activity["segment_id"].duplicated().any()
+            or set(service_activity["segment_id"]) != set(result.segments["segment_id"])
+            or service_activity["scheduled_trips"].isna().any()
+            or service_activity["scheduled_trips"].lt(0).any()
+            or service_activity["scheduled_trips"].mod(1).ne(0).any()
+        ):
+            raise ValueError("Service activity requires one valid count per segment.")
+        members = (
+            result.segments[["segment_id", "shape_id"]]
+            .merge(membership[["segment_id", "display_id"]], on="segment_id")
+            .merge(service_activity[["segment_id", "scheduled_trips"]], on="segment_id")
+        )
+        counts = members.groupby("display_id", as_index=False)["scheduled_trips"].sum()
+        inactive = (
+            members.loc[members["scheduled_trips"].eq(0)]
+            .groupby("display_id")["shape_id"]
+            .agg(lambda values: tuple(sorted(set(values))))
+        )
+        counts["inactive_shape_ids"] = counts["display_id"].map(
+            lambda identifier: inactive.get(identifier, ())
+        )
+        snapshots = snapshots.merge(counts, on="display_id", validate="many_to_one")
     snapshots = snapshots.sort_values(
         ["as_of", "display_id", "observed_at", "segment_id"],
         ascending=[True, True, False, True],
@@ -171,6 +228,11 @@ def prepare_congestion_snapshots(
         snapshots["observed_at"].notna()
     )
     snapshots["segment_id"] = snapshots.pop("display_id")
+    snapshots["status"] = "unobserved"
+    snapshots.loc[snapshots["scheduled_trips"].eq(0), "status"] = "inactive"
+    snapshots.loc[snapshots["last_probe_at"].notna(), "status"] = "unavailable"
+    snapshots.loc[snapshots["observed_at"].notna(), "status"] = "stale"
+    snapshots.loc[snapshots["is_fresh"], "status"] = "fresh"
     return snapshots.sort_values(["as_of", "segment_id"], kind="stable").reset_index(
         drop=True
     )
@@ -223,15 +285,25 @@ def make_congestion_map(
         for row in snapshot.itertuples(index=False):
             value = row.congestion_index
             longitude, latitude = row.geometry.xy
-            reading = (
-                f"{value_label}: {value:.2f}"
-                if pd.notna(value)
-                else "No recent estimate"
-            )
+            reading = {
+                "fresh": f"{value_label}: {value:.2f}",
+                "stale": "Stale estimate: maximum observation age exceeded",
+                "unobserved": "No matching vehicle observations by this timestamp",
+                "inactive": "Inactive service variant: no scheduled trips in selected period",
+                "unavailable": "Matched vehicle observations, but no eligible congestion baseline",
+            }[row.status]
             provenance = (
                 f"Observed (UTC): {row.observed_at}<br>Age: {row.age}"
                 if pd.notna(row.observed_at)
                 else "No estimate observed by this timestamp"
+            )
+            service = (
+                "Service activity: not evaluated"
+                if pd.isna(row.scheduled_trips)
+                else (
+                    f"Scheduled trip traversals in selected period: {row.scheduled_trips}"
+                    f"<br>Inactive shapes in selected period: {row.inactive_shape_ids}"
+                )
             )
             traces.append(
                 go.Scattermap(
@@ -255,7 +327,7 @@ def make_congestion_map(
                         f"<br>Source segment: {row.source_segment_id}"
                         f"<br>Source shape: {row.source_shape_id}"
                         f"<br>As of (UTC): {as_of}"
-                        f"<br>{reading}<br>{provenance}"
+                        f"<br>{reading}<br>{provenance}<br>{service}"
                     ),
                     hoverinfo="text",
                 )

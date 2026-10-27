@@ -7,6 +7,7 @@ from .backtest_cache import (
 )
 from .backtest_data import BacktestDataset, download_backtest_data, get_backtest_dataset
 from .congestion_display import make_congestion_map, prepare_congestion_snapshots
+from .congestion_service import get_congestion_service_activity
 from .road_segment_congestion import CongestionResult, run_congestion_engine
 from .static_gtfs import download_static_gtfs
 from .trip_updates import (
@@ -21,6 +22,7 @@ __all__ = [
     "download_backtest_data",
     "download_static_gtfs",
     "get_backtest_dataset",
+    "get_congestion_service_activity",
     "get_latest_stop_delays",
     "get_stop_delay_horizons",
     "get_trip_updates_for_trip",

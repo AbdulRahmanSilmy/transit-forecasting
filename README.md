@@ -110,6 +110,21 @@ Missing or inactive duplicates cannot cover an observed road section. Engine
 values and baselines remain separate: different directions, stop pairs, or paths
 are never combined, even when some of their geometry overlaps.
 
+Hover states distinguish fresh estimates, expired estimates, no matched probes
+yet, matched probes without an eligible congestion baseline, and inactive service
+variants. Schedule activity comes from `get_congestion_service_activity`, using
+the selected snapshot's agency timezone, weekly calendar, dated additions and
+removals, and GTFS times beyond 24:00. Counts indicate trips whose scheduled
+interval overlaps the selected period, not the exact time a bus crosses each
+segment. Missing or invalid schedule metadata raises an error rather than
+silently labeling service inactive. Without schedule classification, hover text
+explicitly says activity was not evaluated.
+
+The notebook displays the original per-segment activity table for inspection,
+including inactive duplicate shapes hidden by an observed equivalent road.
+Static GTFS segments are retained even when inactive in the selected period;
+actual observations always take precedence over schedule-based status.
+
 ## Data Ingestion
 The ingestion scripts live under [data_ingestion/](data_ingestion), and [data_ingestion/config.yaml](data_ingestion/config.yaml) defines the configuration. It pulls environmental variables from a `.env` file. To run the code, use [.env.example](data_ingestion/.env.example) as a reference for what to include in your `.env` file.
 
