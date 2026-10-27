@@ -171,9 +171,9 @@ def get_congestion_service_activity(
 
     lookback_days = int(trips["arrival"].max() // pd.Timedelta(days=1))
     first_day = start.tz_convert(zone).tz_localize(None).normalize() - pd.Timedelta(
-        days=lookback_days
+        days=lookback_days + 1
     )
-    last_day = end.tz_convert(zone).tz_localize(None).normalize()
+    last_day = end.tz_convert(zone).tz_localize(None).normalize() + pd.Timedelta(days=1)
     counts = pd.Series(0, index=trips["trip_id"], dtype="int64")
     for day in pd.date_range(first_day, last_day, freq="D"):
         active = set()

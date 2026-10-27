@@ -331,6 +331,18 @@ def test_service_times_beyond_midnight_use_previous_service_day(tmp_path: Path) 
     assert activity["scheduled_trips"].tolist() == [1, 1]
 
 
+def test_gtfs_noon_reference_handles_spring_clock_change(tmp_path: Path) -> None:
+    _schedule(tmp_path, departure="00:00:00", arrival="00:20:00")
+    (tmp_path / "calendar.txt").unlink()
+    pd.DataFrame(
+        {"service_id": ["weekday"], "date": [20260308], "exception_type": [1]}
+    ).to_csv(tmp_path / "calendar_dates.txt", index=False)
+    activity = get_congestion_service_activity(
+        _result(), tmp_path, start="2026-03-08 07:10Z", end="2026-03-08 07:15Z"
+    )
+    assert activity["scheduled_trips"].tolist() == [1, 1]
+
+
 def test_service_interval_overlap_is_inclusive(tmp_path: Path) -> None:
     _schedule(tmp_path)
     activity = get_congestion_service_activity(
@@ -410,3 +422,92 @@ def test_incomplete_service_metadata_is_rejected() -> None:
             pd.to_datetime(["2026-10-24 10:10Z"]),
             service_activity=pd.DataFrame({"segment_id": [0], "scheduled_trips": [1]}),
         )
+
+
+def test_trailing_smoothing_uses_observations_not_repeated_frames() -> None:
+    result = _result()
+    sparse = pd.to_datetime(["2026-10-24 10:07Z"])
+    dense = pd.date_range("2026-10-24 10:01Z", "2026-10-24 10:07Z", freq="1min")
+    one = prepare_congestion_snapshots(result, sparse, smoothing_window="50min")
+    many = prepare_congestion_snapshots(result, dense, smoothing_window="50min")
+    road = one.iloc[0]
+    assert road["congestion_index"] == pytest.approx(0.5)
+    assert road["raw_congestion_index"] == 0.8
+    pdt.assert_frame_equal(
+        one, many.loc[many["as_of"].eq(sparse[0])].reset_index(drop=True)
+    )
+
+
+def test_smoothing_uses_history_before_first_display_frame_without_future_leakage() -> (
+    None
+):
+    result = _result()
+    times = pd.to_datetime(["2026-10-24 10:05Z", "2026-10-24 10:07Z"])
+    snapshots = prepare_congestion_snapshots(result, times, smoothing_window="50min")
+    road = snapshots.loc[snapshots["segment_id"].eq(0)]
+    assert road["congestion_index"].tolist() == pytest.approx([0.2, 0.5])
+    assert (
+        road["observed_at"].tolist()
+        == pd.to_datetime(["2026-10-24 10:01Z", "2026-10-24 10:06Z"]).tolist()
+    )
+
+
+def test_future_estimates_cannot_change_earlier_smoothed_frame() -> None:
+    result = _result()
+    times = pd.to_datetime(["2026-10-24 10:05Z"])
+    full = prepare_congestion_snapshots(result, times, smoothing_window="50min")
+    earlier = replace(
+        result,
+        congestion=result.congestion.iloc[:1],
+        vehicle_probes=result.vehicle_probes.iloc[:1],
+    )
+    truncated = prepare_congestion_snapshots(earlier, times, smoothing_window="50min")
+    pdt.assert_frame_equal(full, truncated)
+
+
+def test_smoothing_window_left_boundary_is_exclusive() -> None:
+    times = pd.to_datetime(["2026-10-24 10:07Z"])
+    narrow = prepare_congestion_snapshots(_result(), times, smoothing_window="5min")
+    wider = prepare_congestion_snapshots(_result(), times, smoothing_window="6min")
+    assert narrow.iloc[0]["congestion_index"] == 0.8
+    assert wider.iloc[0]["congestion_index"] == pytest.approx(0.5)
+
+
+def test_smoothing_never_extends_freshness_or_fills_unobserved_segments() -> None:
+    times = pd.to_datetime(["2026-10-24 10:21Z", "2026-10-24 10:22Z"])
+    raw = prepare_congestion_snapshots(_result(), times)
+    smoothed = prepare_congestion_snapshots(_result(), times, smoothing_window="50min")
+    pdt.assert_series_equal(raw["observed_at"], smoothed["observed_at"])
+    pdt.assert_series_equal(raw["age"], smoothed["age"])
+    pdt.assert_series_equal(raw["status"], smoothed["status"])
+    assert smoothed["congestion_index"].notna().tolist() == [True, False, False, False]
+
+
+def test_smoothing_does_not_mix_equivalent_shapes() -> None:
+    result = _with_duplicate(_result(), observed_at="2026-10-24 10:08Z")
+    snapshots = prepare_congestion_snapshots(
+        result, pd.to_datetime(["2026-10-24 10:09Z"]), smoothing_window="50min"
+    )
+    assert snapshots.iloc[0]["source_segment_id"] == 2
+    assert snapshots.iloc[0]["congestion_index"] == 0.6
+
+
+@pytest.mark.parametrize("window", ["0min", "-1min", "NaT", "invalid"])
+def test_invalid_smoothing_window_is_rejected(window: str) -> None:
+    with pytest.raises(ValueError):
+        prepare_congestion_snapshots(
+            _result(), pd.to_datetime(["2026-10-24 10:07Z"]), smoothing_window=window
+        )
+
+
+def test_smoothing_all_missing_estimates_is_supported() -> None:
+    result = _result()
+    empty = replace(
+        result,
+        congestion=result.congestion.iloc[:0],
+        vehicle_probes=result.vehicle_probes.iloc[:0],
+    )
+    snapshots = prepare_congestion_snapshots(
+        empty, pd.to_datetime(["2026-10-24 10:07Z"]), smoothing_window="50min"
+    )
+    assert snapshots["congestion_index"].isna().all()

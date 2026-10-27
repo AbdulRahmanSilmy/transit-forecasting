@@ -125,6 +125,19 @@ including inactive duplicate shapes hidden by an observed equivalent road.
 Static GTFS segments are retained even when inactive in the selected period;
 actual observations always take precedence over schedule-based status.
 
+Set `smoothing_window` on `prepare_congestion_snapshots` to smooth actual
+segment/bin estimates with a trailing time window before selecting display
+frames. Each observation contributes once; repeated carried-forward frames do
+not add weight. The window is open on the left and closed at the observation
+timestamp. The notebook uses 50 minutes rather than a centered 10-frame mean.
+Smoothing is performed separately for each engine segment, before equivalent
+paths choose their freshest source, and never advances observation timestamps,
+extends expiry, or consumes future observations. Historical observations before
+the visible window still contribute when eligible. `raw_congestion_index`
+retains the selected raw value while `congestion_index` contains the displayed,
+freshness-masked value. The latest raw map remains identical to the final raw
+animation frame; smoothed values are intentionally different.
+
 ## Data Ingestion
 The ingestion scripts live under [data_ingestion/](data_ingestion), and [data_ingestion/config.yaml](data_ingestion/config.yaml) defines the configuration. It pulls environmental variables from a `.env` file. To run the code, use [.env.example](data_ingestion/.env.example) as a reference for what to include in your `.env` file.
 

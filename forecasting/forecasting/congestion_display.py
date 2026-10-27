@@ -61,6 +61,7 @@ def prepare_congestion_snapshots(
     *,
     max_age: str | pd.Timedelta = "15min",
     service_activity: pd.DataFrame | None = None,
+    smoothing_window: str | pd.Timedelta | None = None,
 ) -> pd.DataFrame:
     """Select fresh, already-observed estimates at each requested timestamp.
 
@@ -85,6 +86,12 @@ def prepare_congestion_snapshots(
     service_activity : pandas.DataFrame or None, optional
         Output of ``get_congestion_service_activity`` for the shared selected
         period. When omitted, schedule activity is explicitly unevaluated.
+    smoothing_window : str, pandas.Timedelta, or None, optional
+        Positive trailing time window over actual segment/bin observations.
+        Each aggregate contributes once, regardless of display cadence.
+        Smoothing is calculated at observation timestamps before carrying
+        values to frames; it neither uses future observations nor refreshes
+        their timestamps. The default, ``None``, displays raw estimates.
 
     Returns
     -------
@@ -116,6 +123,10 @@ def prepare_congestion_snapshots(
     max_age = pd.Timedelta(max_age)
     if pd.isna(max_age) or max_age <= pd.Timedelta(0):
         raise ValueError("max_age must be a positive duration.")
+    if smoothing_window is not None:
+        smoothing_window = pd.Timedelta(smoothing_window)
+        if pd.isna(smoothing_window) or smoothing_window <= pd.Timedelta(0):
+            raise ValueError("smoothing_window must be a positive duration.")
     if result.segments.empty or result.segments["segment_id"].duplicated().any():
         raise ValueError("Engine segments must be nonempty with unique segment IDs.")
 
@@ -143,6 +154,14 @@ def prepare_congestion_snapshots(
             observations["segment_id"].eq(segment_id),
             ["observed_at", "congestion_index"],
         ].sort_values("observed_at")
+        history["raw_congestion_index"] = history["congestion_index"]
+        if smoothing_window is not None:
+            history["congestion_index"] = (
+                history.set_index("observed_at")["congestion_index"]
+                .rolling(smoothing_window, min_periods=1, closed="right")
+                .mean()
+                .to_numpy()
+            )
         selected = pd.merge_asof(
             pd.DataFrame({"as_of": times}),
             history,
@@ -166,6 +185,9 @@ def prepare_congestion_snapshots(
     snapshots["is_fresh"] = snapshots["age"].le(max_age)
     snapshots["last_congestion_index"] = snapshots["congestion_index"]
     snapshots["congestion_index"] = snapshots["congestion_index"].where(
+        snapshots["is_fresh"]
+    )
+    snapshots["raw_congestion_index"] = snapshots["raw_congestion_index"].where(
         snapshots["is_fresh"]
     )
     membership = _equivalent_segments(result.segments)
