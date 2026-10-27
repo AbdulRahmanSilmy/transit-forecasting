@@ -102,6 +102,14 @@ The latest map and final raw animation frame share their timestamp and freshness
 settings. Hover labels show the actual observation time and age; an old estimate
 is never described as current. Neither function modifies engine results.
 
+For display only, identical geometries sharing the same direction and directed
+stop pair are represented once. The freshest eligible shape-specific estimate
+wins; equal observation times are resolved by the lowest engine segment ID.
+Hover labels retain group membership and the selected source segment/shape.
+Missing or inactive duplicates cannot cover an observed road section. Engine
+values and baselines remain separate: different directions, stop pairs, or paths
+are never combined, even when some of their geometry overlaps.
+
 ## Data Ingestion
 The ingestion scripts live under [data_ingestion/](data_ingestion), and [data_ingestion/config.yaml](data_ingestion/config.yaml) defines the configuration. It pulls environmental variables from a `.env` file. To run the code, use [.env.example](data_ingestion/.env.example) as a reference for what to include in your `.env` file.
 

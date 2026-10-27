@@ -10,6 +10,51 @@ from shapely.geometry import LineString, MultiLineString
 from .road_segment_congestion import CongestionResult
 
 
+def _equivalent_segments(segments: pd.DataFrame) -> pd.DataFrame:
+    """Map equivalent directed stop-pair geometries to a stable display ID.
+
+    Parameters
+    ----------
+    segments : pandas.DataFrame
+        Engine segments with unique IDs.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Segment membership, using the lowest segment ID in each group.
+    """
+    candidates: dict[tuple[int, str, str], list[tuple[int, LineString]]] = {}
+    rows = []
+    for row in segments.sort_values("segment_id").itertuples(index=False):
+        key = (row.trip_direction_id, row.from_stop_id, row.to_stop_id)
+        matches = candidates.setdefault(key, [])
+        display_id = next(
+            (
+                segment_id
+                for segment_id, geometry in matches
+                if geometry.equals(row.geometry)
+            ),
+            row.segment_id,
+        )
+        if display_id == row.segment_id:
+            matches.append((display_id, row.geometry))
+        rows.append(
+            dict(
+                segment_id=row.segment_id,
+                display_id=display_id,
+                shape_id=row.shape_id,
+            )
+        )
+    membership = pd.DataFrame(rows)
+    members = membership.groupby("display_id", as_index=False).agg(
+        member_segment_ids=("segment_id", tuple),
+        member_shape_ids=("shape_id", lambda values: tuple(sorted(set(values)))),
+    )
+    return membership.drop(columns="shape_id").merge(
+        members, on="display_id", validate="many_to_one"
+    )
+
+
 def prepare_congestion_snapshots(
     result: CongestionResult,
     times: pd.DatetimeIndex,
@@ -22,7 +67,10 @@ def prepare_congestion_snapshots(
     not at its floored time-bin label. Historical observations may seed the
     first frame, but are never carried past ``max_age``. The engine's full-
     history speed baselines are unchanged; this is a display replay, not a
-    point-in-time baseline backtest. Inputs are not modified.
+    point-in-time baseline backtest. Equivalent paths with the same direction
+    and directed stop pair share one display row. The freshest observation
+    wins, with the lowest source segment ID breaking timestamp ties; values
+    and baselines are never pooled across shapes. Inputs are not modified.
 
     Parameters
     ----------
@@ -37,7 +85,11 @@ def prepare_congestion_snapshots(
     Returns
     -------
     pandas.DataFrame
-        One row per timestamp and segment, with segment metadata, ``as_of``,
+        One row per timestamp and equivalent road section. ``segment_id`` is
+        the group's lowest engine segment ID; ``source_segment_id`` and
+        ``source_shape_id`` identify the selected observation. Membership is
+        retained in ``member_segment_ids`` and ``member_shape_ids``.
+        Other columns include segment metadata, ``as_of``,
         ``observed_at``, ``age``, ``is_fresh``, ``last_congestion_index``, and
         freshness-masked ``congestion_index``.
 
@@ -99,12 +151,28 @@ def prepare_congestion_snapshots(
     snapshots["congestion_index"] = snapshots["congestion_index"].where(
         snapshots["is_fresh"]
     )
-    return (
-        snapshots.merge(
-            result.segments, on="segment_id", how="left", validate="many_to_one"
-        )
-        .sort_values(["as_of", "segment_id"], kind="stable")
-        .reset_index(drop=True)
+    snapshots = snapshots.merge(
+        result.segments, on="segment_id", how="left", validate="many_to_one"
+    ).merge(
+        _equivalent_segments(result.segments),
+        on="segment_id",
+        validate="many_to_one",
+    )
+    snapshots = snapshots.sort_values(
+        ["as_of", "display_id", "observed_at", "segment_id"],
+        ascending=[True, True, False, True],
+        kind="stable",
+        na_position="last",
+    ).drop_duplicates(["as_of", "display_id"])
+    snapshots["source_segment_id"] = (
+        snapshots["segment_id"].where(snapshots["observed_at"].notna()).astype("Int64")
+    )
+    snapshots["source_shape_id"] = snapshots["shape_id"].where(
+        snapshots["observed_at"].notna()
+    )
+    snapshots["segment_id"] = snapshots.pop("display_id")
+    return snapshots.sort_values(["as_of", "segment_id"], kind="stable").reset_index(
+        drop=True
     )
 
 
@@ -182,7 +250,11 @@ def make_congestion_map(
                     hovertext=(
                         f"Direction {row.trip_direction_id} | segment {row.segment_id}: "
                         f"{row.from_stop_name} -> {row.to_stop_name}"
-                        f"<br>Shape {row.shape_id}<br>As of (UTC): {as_of}"
+                        f"<br>Equivalent segments: {row.member_segment_ids}"
+                        f"<br>Shapes: {row.member_shape_ids}"
+                        f"<br>Source segment: {row.source_segment_id}"
+                        f"<br>Source shape: {row.source_shape_id}"
+                        f"<br>As of (UTC): {as_of}"
                         f"<br>{reading}<br>{provenance}"
                     ),
                     hoverinfo="text",

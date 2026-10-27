@@ -146,3 +146,97 @@ def test_rejects_inconsistent_map_frames() -> None:
     )
     with pytest.raises(ValueError, match="same segments"):
         make_congestion_map(snapshots.iloc[:-1], result.route_geometry, title="Invalid")
+
+
+def _with_duplicate(
+    result: CongestionResult, *, observed_at: str | None = None
+) -> CongestionResult:
+    duplicate = result.segments.iloc[[0]].assign(segment_id=2, shape_id="short")
+    segments = pd.concat([result.segments, duplicate], ignore_index=True)
+    if observed_at is None:
+        return replace(result, segments=segments)
+    timestamp = pd.Timestamp(observed_at)
+    observation = pd.DataFrame(
+        {
+            "segment_id": [2],
+            "time_bin": [timestamp.floor("5min")],
+            "congestion_index": [0.6],
+        }
+    )
+    probe = observation[["segment_id", "time_bin"]].assign(feed_timestamp=timestamp)
+    return replace(
+        result,
+        segments=segments,
+        congestion=pd.concat([result.congestion, observation], ignore_index=True),
+        vehicle_probes=pd.concat([result.vehicle_probes, probe], ignore_index=True),
+    )
+
+
+def test_missing_duplicate_cannot_hide_observed_identical_road() -> None:
+    result = _with_duplicate(_result())
+    snapshots = prepare_congestion_snapshots(
+        result, pd.to_datetime(["2026-10-24 10:10Z"])
+    )
+    assert snapshots["segment_id"].tolist() == [0, 1]
+    road = snapshots.iloc[0]
+    assert road["congestion_index"] == 0.8
+    assert road["member_segment_ids"] == (0, 2)
+    assert road["member_shape_ids"] == ("main", "short")
+    assert road["source_segment_id"] == 0
+    assert road["source_shape_id"] == "main"
+    figure = make_congestion_map(snapshots, result.route_geometry, title="Observed")
+    assert len(figure.data) == 2
+    assert figure.data[0].line.color != "gray"
+    assert "Equivalent segments: (0, 2)" in figure.data[0].hovertext
+
+
+def test_freshest_source_changes_without_changing_display_identity() -> None:
+    result = _with_duplicate(_result(), observed_at="2026-10-24 10:08Z")
+    snapshots = prepare_congestion_snapshots(
+        result, pd.to_datetime(["2026-10-24 10:07Z", "2026-10-24 10:09Z"])
+    )
+    road = snapshots.loc[snapshots["segment_id"].eq(0)]
+    assert road["source_segment_id"].tolist() == [0, 2]
+    assert road["congestion_index"].tolist() == [0.8, 0.6]
+    assert road["member_segment_ids"].tolist() == [(0, 2), (0, 2)]
+
+
+def test_equal_timestamps_use_lowest_source_id_independent_of_input_order() -> None:
+    result = _with_duplicate(_result(), observed_at="2026-10-24 10:06Z")
+    times = pd.to_datetime(["2026-10-24 10:10Z"])
+    first = prepare_congestion_snapshots(result, times)
+    reversed_result = replace(
+        result,
+        segments=result.segments.iloc[::-1],
+        congestion=result.congestion.iloc[::-1],
+        vehicle_probes=result.vehicle_probes.iloc[::-1],
+    )
+    second = prepare_congestion_snapshots(reversed_result, times)
+    pdt.assert_frame_equal(first, second)
+    assert first.iloc[0]["source_segment_id"] == 0
+
+
+@pytest.mark.parametrize("difference", ["direction", "stop_pair", "geometry"])
+def test_only_equivalent_directed_stop_pair_paths_are_combined(difference: str) -> None:
+    result = _with_duplicate(_result())
+    segments = result.segments.copy()
+    if difference == "direction":
+        segments.loc[segments["segment_id"].eq(2), "trip_direction_id"] = 1
+    elif difference == "stop_pair":
+        segments.loc[segments["segment_id"].eq(2), "to_stop_id"] = "express"
+    else:
+        segments.at[2, "geometry"] = LineString([(0, 0), (0.5, 1), (1, 0)])
+    snapshots = prepare_congestion_snapshots(
+        replace(result, segments=segments), pd.to_datetime(["2026-10-24 10:10Z"])
+    )
+    assert snapshots["segment_id"].tolist() == [0, 1, 2]
+    assert snapshots["member_segment_ids"].tolist() == [(0,), (1,), (2,)]
+
+
+def test_geometrically_equal_paths_with_extra_vertices_are_combined() -> None:
+    result = _with_duplicate(_result())
+    result.segments.at[2, "geometry"] = LineString([(0, 0), (0.5, 0), (1, 0)])
+    snapshots = prepare_congestion_snapshots(
+        result, pd.to_datetime(["2026-10-24 10:10Z"])
+    )
+    assert snapshots["segment_id"].tolist() == [0, 1]
