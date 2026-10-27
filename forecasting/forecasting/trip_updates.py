@@ -1,6 +1,7 @@
 """Utilities for selecting and associating GTFS trip updates."""
 
 import warnings
+from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
@@ -68,6 +69,49 @@ def get_latest_stop_delays(
     -----
     UserWarning
         If missing start descriptors require approximate daily grouping.
+    """
+    updates, visit_columns = _prepare_stop_delay_updates(
+        df_trip_updates,
+        df_stops,
+        route_id=route_id,
+        stop_name=stop_name,
+        agency_timezone=agency_timezone,
+    )
+    return (
+        updates.drop_duplicates(visit_columns, keep="first")
+        .sort_values("feed_timestamp", kind="stable")
+        .reset_index(drop=True)
+    )
+
+
+def _prepare_stop_delay_updates(
+    df_trip_updates: pd.DataFrame,
+    df_stops: pd.DataFrame,
+    *,
+    route_id: str,
+    stop_name: str,
+    agency_timezone: str,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Normalize and order a stop's prediction history without mutating inputs.
+
+    Parameters
+    ----------
+    df_trip_updates : pandas.DataFrame
+        Realtime trip updates.
+    df_stops : pandas.DataFrame
+        Static GTFS stops.
+    route_id : str
+        Route to select.
+    stop_name : str
+        Exact stop name to select.
+    agency_timezone : str
+        Timezone for approximate grouping of missing trip start descriptors.
+
+    Returns
+    -------
+    tuple[pandas.DataFrame, list[str]]
+        Validated updates, newest first with database ID breaking timestamp
+        ties, and columns identifying a trip's stop visit.
     """
     required_updates = (
         "trip_route_id",
@@ -145,15 +189,192 @@ def get_latest_stop_delays(
     order_columns = ["feed_timestamp"]
     if "id" in updates.columns:
         order_columns.append("id")
-    latest = (
-        updates.sort_values(order_columns, ascending=False, kind="stable")
-        .drop_duplicates(visit_columns, keep="first")
-        .sort_values("feed_timestamp", kind="stable")
+    updates = updates.sort_values(order_columns, ascending=False, kind="stable")
+    updates["stop_name"] = stop_name
+    updates["delay_minutes"] = updates["arrival_delay"] / 60.0
+    return updates, visit_columns
+
+
+def get_stop_delay_horizons(
+    df_trip_updates: pd.DataFrame,
+    df_stops: pd.DataFrame,
+    *,
+    route_id: str,
+    stop_name: str,
+    horizons_minutes: Sequence[int] = range(1, 31),
+    agency_timezone: str = "America/Vancouver",
+) -> pd.DataFrame:
+    """Compare historical predictions with each stop visit's final delay.
+
+    Use the same visit grouping and final-row selection as
+    ``get_latest_stop_delays``. The final row's ``arrival_delay`` is the truth
+    proxy, and its ``arrival_time`` anchors the look-back intervals. For each
+    interval, select the latest update published at or before that cutoff,
+    never a later update or an interpolated value. Timestamp ties use the
+    greatest database ``id`` when available, otherwise the first input row.
+
+    Visits with missing final delays or arrival times, or final arrival times
+    after the input's last publication, are excluded with a warning. This
+    removes obviously unfinished visits, but does not establish ground truth.
+    A missing delay in the selected historical row remains missing; an older
+    nonmissing delay is not substituted. Neither input frame is modified.
+
+    Parameters
+    ----------
+    df_trip_updates : pandas.DataFrame
+        Updates accepted by ``get_latest_stop_delays``, plus ``arrival_time``
+        as a datetime or datetime string. Naive timestamps are treated as UTC.
+        Filter this frame to a single direction/platform before calling when
+        needed; different platforms and stop sequences are never pooled.
+    df_stops : pandas.DataFrame
+        GTFS stops containing ``stop_id`` and ``stop_name``.
+    route_id : str
+        GTFS route identifier.
+    stop_name : str
+        Exact stop name.
+    horizons_minutes : collections.abc.Sequence of int, optional
+        Unique positive look-back intervals, defaulting to every minute from
+        1 through 30.
+    agency_timezone : str, optional
+        Timezone for missing-start grouping, default ``"America/Vancouver"``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per eligible visit and horizon, including trip/stop identifiers,
+        ``reference_arrival_time``, ``reference_feed_timestamp``,
+        ``true_delay_minutes``, ``horizon_minutes``, ``cutoff_time``,
+        ``estimate_feed_timestamp``, ``estimated_delay_minutes``,
+        ``estimate_age_minutes`` (age at the cutoff), ``error_minutes``
+        (estimate minus truth), and ``absolute_error_minutes``. Missing
+        predictions remain present as NaN rows, allowing coverage measurement.
+
+    Raises
+    ------
+    ValueError
+        If horizons or matching data are invalid, ``arrival_time`` is absent,
+        or no visits have usable final references.
+
+    Warns
+    -----
+    UserWarning
+        If approximate daily grouping is needed or references are excluded.
+    """
+    horizons = list(horizons_minutes)
+    if (
+        not horizons
+        or any(
+            isinstance(value, (bool, np.bool_))
+            or not isinstance(value, (int, np.integer))
+            or value <= 0
+            for value in horizons
+        )
+        or len(set(horizons)) != len(horizons)
+    ):
+        raise ValueError("horizons_minutes must contain unique positive integers.")
+
+    updates, visit_columns = _prepare_stop_delay_updates(
+        df_trip_updates,
+        df_stops,
+        route_id=route_id,
+        stop_name=stop_name,
+        agency_timezone=agency_timezone,
+    )
+    if "arrival_time" not in updates.columns:
+        raise ValueError("df_trip_updates is missing required columns: arrival_time")
+    updates["_stop_visit_id"] = updates.groupby(
+        visit_columns, dropna=False, sort=False
+    ).ngroup()
+    references = updates.drop_duplicates(visit_columns, keep="first").copy()
+    references["arrival_time"] = pd.to_datetime(
+        references["arrival_time"], utc=True, errors="raise"
+    )
+    observation_end = pd.to_datetime(
+        df_trip_updates["feed_timestamp"], utc=True, errors="raise"
+    ).max()
+    missing_reference = (
+        references["arrival_time"].isna() | references["arrival_delay"].isna()
+    )
+    unfinished_reference = references["arrival_time"].gt(observation_end)
+    excluded = missing_reference | unfinished_reference
+    if excluded.any():
+        warnings.warn(
+            f"Excluded {int(excluded.sum())} stop visits: "
+            f"{int(missing_reference.sum())} with missing final delay/arrival "
+            f"and {int(unfinished_reference.sum())} with final arrival after "
+            "the recording window.",
+            UserWarning,
+            stacklevel=2,
+        )
+    references = references.loc[~excluded]
+    if references.empty:
+        raise ValueError("No stop visits have usable final delay/arrival references.")
+
+    reference_columns = [
+        "_stop_visit_id",
+        "trip_id",
+        "trip_start_timestamp",
+        "trip_instance_key",
+        "stop_id",
+        "stop_name",
+        "feed_timestamp",
+        "arrival_time",
+        "delay_minutes",
+    ]
+    reference_columns.extend(
+        column
+        for column in ("stop_sequence", "trip_direction_id")
+        if column in references.columns
+    )
+    references = references[reference_columns].rename(
+        columns={
+            "feed_timestamp": "reference_feed_timestamp",
+            "arrival_time": "reference_arrival_time",
+            "delay_minutes": "true_delay_minutes",
+        }
+    )
+    targets = references.merge(
+        pd.DataFrame({"horizon_minutes": sorted(horizons)}), how="cross"
+    )
+    targets["cutoff_time"] = targets["reference_arrival_time"] - pd.to_timedelta(
+        targets["horizon_minutes"], unit="min"
+    )
+    history = (
+        updates.drop_duplicates(["_stop_visit_id", "feed_timestamp"], keep="first")[
+            ["_stop_visit_id", "feed_timestamp", "delay_minutes"]
+        ]
+        .rename(
+            columns={
+                "feed_timestamp": "estimate_feed_timestamp",
+                "delay_minutes": "estimated_delay_minutes",
+            }
+        )
+        .sort_values("estimate_feed_timestamp", kind="stable")
+    )
+    result = pd.merge_asof(
+        targets.sort_values("cutoff_time", kind="stable"),
+        history,
+        left_on="cutoff_time",
+        right_on="estimate_feed_timestamp",
+        by="_stop_visit_id",
+        direction="backward",
+        allow_exact_matches=True,
+    )
+    result["estimate_age_minutes"] = (
+        result["cutoff_time"] - result["estimate_feed_timestamp"]
+    ).dt.total_seconds() / 60.0
+    result["error_minutes"] = (
+        result["estimated_delay_minutes"] - result["true_delay_minutes"]
+    )
+    result["absolute_error_minutes"] = result["error_minutes"].abs()
+    return (
+        result.sort_values(
+            ["reference_arrival_time", "_stop_visit_id", "horizon_minutes"],
+            kind="stable",
+        )
+        .drop(columns="_stop_visit_id")
         .reset_index(drop=True)
     )
-    latest["stop_name"] = stop_name
-    latest["delay_minutes"] = latest["arrival_delay"] / 60.0
-    return latest
 
 
 def get_trip_updates_for_trip(
