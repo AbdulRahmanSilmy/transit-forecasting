@@ -266,6 +266,7 @@ def make_congestion_map(
     *,
     title: str,
     value_label: str = "Congestion index",
+    frame_duration_ms: int = 250,
 ) -> go.Figure:
     """Plot a snapshot or animation with the same trace and hover semantics.
 
@@ -280,6 +281,9 @@ def make_congestion_map(
         Figure title.
     value_label : str, optional
         Label for the displayed congestion value.
+    frame_duration_ms : int, optional
+        Playback duration for each animation frame, in milliseconds.
+        Set to zero for immediate frame changes.
 
     Returns
     -------
@@ -289,8 +293,15 @@ def make_congestion_map(
     Raises
     ------
     ValueError
-        If snapshots are empty, duplicated, or have inconsistent segments.
+        If snapshots are empty, duplicated, or have inconsistent segments, or
+        if ``frame_duration_ms`` is not a non-negative integer.
     """
+    if (
+        isinstance(frame_duration_ms, bool)
+        or not isinstance(frame_duration_ms, int)
+        or frame_duration_ms < 0
+    ):
+        raise ValueError("frame_duration_ms must be a non-negative integer.")
     if snapshots.empty or snapshots.duplicated(["as_of", "segment_id"]).any():
         raise ValueError(
             "Map snapshots must be nonempty with unique time/segment rows."
@@ -391,7 +402,7 @@ def make_congestion_map(
                         args=[
                             None,
                             dict(
-                                frame=dict(duration=250, redraw=True),
+                                frame=dict(duration=frame_duration_ms, redraw=True),
                                 fromcurrent=True,
                                 transition=dict(duration=0),
                             ),

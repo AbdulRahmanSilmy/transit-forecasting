@@ -141,6 +141,58 @@ def test_latest_map_equals_final_animation_frame() -> None:
     )
 
 
+def test_animation_frame_duration_is_configurable() -> None:
+    result = _result()
+    snapshots = prepare_congestion_snapshots(
+        result, pd.to_datetime(["2026-10-24 10:05Z", "2026-10-24 10:10Z"])
+    )
+
+    default_figure = make_congestion_map(
+        snapshots, result.route_geometry, title="Default duration"
+    )
+    custom_figure = make_congestion_map(
+        snapshots,
+        result.route_geometry,
+        title="Custom duration",
+        frame_duration_ms=800,
+    )
+    immediate_figure = make_congestion_map(
+        snapshots,
+        result.route_geometry,
+        title="Immediate duration",
+        frame_duration_ms=0,
+    )
+
+    assert (
+        default_figure.layout.updatemenus[0].buttons[0].args[1]["frame"]["duration"]
+        == 250
+    )
+    assert (
+        custom_figure.layout.updatemenus[0].buttons[0].args[1]["frame"]["duration"]
+        == 800
+    )
+    assert (
+        immediate_figure.layout.updatemenus[0].buttons[0].args[1]["frame"]["duration"]
+        == 0
+    )
+
+
+@pytest.mark.parametrize("duration", [-1, 1.5, True])
+def test_rejects_invalid_animation_frame_duration(duration: int | float) -> None:
+    result = _result()
+    snapshots = prepare_congestion_snapshots(
+        result, pd.to_datetime(["2026-10-24 10:05Z", "2026-10-24 10:10Z"])
+    )
+
+    with pytest.raises(ValueError, match="frame_duration_ms must"):
+        make_congestion_map(
+            snapshots,
+            result.route_geometry,
+            title="Invalid duration",
+            frame_duration_ms=duration,
+        )
+
+
 def test_rejects_inconsistent_map_frames() -> None:
     result = _result()
     snapshots = prepare_congestion_snapshots(
