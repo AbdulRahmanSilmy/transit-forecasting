@@ -10,6 +10,15 @@ from .congestion_display import make_congestion_map, prepare_congestion_snapshot
 from .congestion_service import get_congestion_service_activity
 from .road_segment_congestion import CongestionResult, run_congestion_engine
 from .static_gtfs import download_static_gtfs
+from .stop_congestion_analysis import (
+    StopCongestionAnalysis,
+    prepare_stop_congestion_analysis,
+    summarize_stop_congestion_signal,
+)
+from .stop_congestion_display import (
+    make_stop_congestion_cohort_figures,
+    make_stop_congestion_example,
+)
 from .trip_updates import (
     get_latest_stop_delays,
     get_stop_delay_horizons,
@@ -19,6 +28,7 @@ from .trip_updates import (
 __all__ = [
     "BacktestDataset",
     "CongestionResult",
+    "StopCongestionAnalysis",
     "download_backtest_data",
     "download_static_gtfs",
     "get_backtest_dataset",
@@ -29,7 +39,11 @@ __all__ = [
     "list_backtest_datasets",
     "load_backtest_dataset",
     "make_congestion_map",
+    "make_stop_congestion_cohort_figures",
+    "make_stop_congestion_example",
     "prepare_congestion_snapshots",
+    "prepare_stop_congestion_analysis",
     "run_congestion_engine",
     "save_backtest_dataset",
+    "summarize_stop_congestion_signal",
 ]
