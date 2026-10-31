@@ -89,6 +89,56 @@ stored in snapshots.
 
 ## Congestion Maps
 
+### Congestion via arrival-delay changes
+
+The [delay-based notebook](notebooks/road_segment_congestion_via_delays.ipynb)
+reuses the original notebook's cached-backtest workflow for Route `97-KEL`
+and direction `0`, without changing the speed-based analysis. Select the
+saved snapshot explicitly with `backtest_dataset_id` in the notebook.
+`run_delay_congestion_engine` subtracts the latest reported upstream
+`arrival_delay` from the downstream value within the same trip instance.
+Positive seconds mean added delay, zero means no additional delay, and negative
+seconds mean recovery relative to schedule. Existing lateness is not itself a
+segment congestion signal. These are final reported **proxies**, not independently
+observed arrivals or pure road traffic: dwell, holding, schedule slack, and
+prediction revisions can influence the difference.
+
+The engine reuses directed, shape-specific GTFS segment geometry. It keeps one
+latest row per trip instance/stop/sequence (publication time, then greatest
+database ID; first input row otherwise), preserving missing latest estimates.
+`get_latest_stop_delays` also supports omitting `stop_name` to select all route
+stops; unknown stop IDs are retained for auditing. Missing trip starts are
+explicitly excluded from the delay engine to avoid ambiguous daily/midnight
+pairing. Missing, unmatched, unfinished, and temporally reversed endpoints are
+audited, not substituted or bridged across missing stops.
+
+`DelayCongestionResult` exposes `stop_visits`, candidate `traversals`,
+`congestion`, `audit`, and segment geometry. Each usable traversal contributes
+once to its downstream proxy arrival's five-minute UTC bin. Bins contain median
+signed delay change, distinct traversal count, spread, and sign shares. Single
+traversals are low-support observations; their standard deviation is undefined.
+Unobserved segments remain unknown rather than receiving invented zero values.
+
+`prepare_delay_congestion_snapshots` waits for every contributing endpoint's
+publication/receipt and proxy crossing before exposing a final bin. Missing
+trip-update receipt timestamps use publication time with an explicit warning;
+the legacy snapshot therefore supports publication-time, not exact receipt-time,
+replay. Late backfilled bins cannot replace newer crossed bins. The provisional
+15-minute expiry measures age from the last contributing proxy arrival, not
+publication. Optional trailing smoothing uses available actual bins once and
+never extends freshness or pools shapes. Equivalent directed geometries use
+the freshest shape-specific source with deterministic segment-ID tie breaking.
+
+`make_delay_congestion_map` shows signed seconds, with green for recovery,
+yellow for zero, red for accumulation, and grey for stale/unknown readings.
+The symmetric colour saturation limit is visual only; hover values are not
+clipped. The notebook includes a trip decomposition, raw/smoothed animations,
+and an exact-shape segment time series with retrospective crossing-bin counts.
+The latest map stays anchored at the recording end even when coverage has
+expired; it never silently substitutes an earlier good reading.
+
+### Speed-based congestion replay
+
 `prepare_congestion_snapshots` selects the latest already-observed congestion
 estimate at each requested UTC timestamp. An aggregate becomes available at its
 last contributing vehicle probe, not at the start of its five-minute bin.
