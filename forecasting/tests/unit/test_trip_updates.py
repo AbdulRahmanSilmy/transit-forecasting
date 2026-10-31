@@ -258,3 +258,19 @@ def test_latest_stop_delays_reports_empty_or_unmatched_route_updates() -> None:
     ):
         with pytest.raises(ValueError, match="No trip updates were found"):
             _latest_stop_delays(frame)
+
+
+def test_latest_stop_delays_can_select_all_route_stops_and_audit_unknown_ids() -> None:
+    updates = _stop_delay_updates()
+    result = get_latest_stop_delays(updates, _delay_stops(), route_id="97-KEL")
+
+    assert result["id"].tolist() == [3, 2, 5]
+    assert result["stop_name"].iloc[:2].eq("Harvey Ave at Gordon Stn").all()
+    assert pd.isna(result["stop_name"].iloc[-1])
+    assert result["stop_id"].iloc[-1] == "elsewhere"
+
+
+def test_latest_stop_delays_rejects_ambiguous_stop_metadata_for_all_stops() -> None:
+    stops = pd.concat([_delay_stops(), _delay_stops().iloc[[0]]])
+    with pytest.raises(ValueError, match="unique, nonmissing stop IDs"):
+        get_latest_stop_delays(_stop_delay_updates(), stops, route_id="97-KEL")

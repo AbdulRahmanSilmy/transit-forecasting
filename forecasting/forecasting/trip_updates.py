@@ -12,7 +12,7 @@ def get_latest_stop_delays(
     df_stops: pd.DataFrame,
     *,
     route_id: str,
-    stop_name: str,
+    stop_name: str | None = None,
     agency_timezone: str = "America/Vancouver",
 ) -> pd.DataFrame:
     """Select the latest reported arrival delay for each trip's stop visit.
@@ -45,8 +45,10 @@ def get_latest_stop_delays(
         GTFS stops containing ``stop_id`` and ``stop_name``.
     route_id : str
         GTFS route identifier, such as ``"97-KEL"``.
-    stop_name : str
-        Exact stop name. All matching platforms are included.
+    stop_name : str or None, optional
+        Exact stop name. All matching platforms are included. The default,
+        ``None``, selects visits at every stop on the route. Unknown stop IDs
+        are retained with missing names so callers can audit GTFS mismatches.
     agency_timezone : str, optional
         Timezone used for publication-date grouping when start descriptors
         are absent. Defaults to ``"America/Vancouver"``.
@@ -89,7 +91,7 @@ def _prepare_stop_delay_updates(
     df_stops: pd.DataFrame,
     *,
     route_id: str,
-    stop_name: str,
+    stop_name: str | None,
     agency_timezone: str,
 ) -> tuple[pd.DataFrame, list[str]]:
     """Normalize and order a stop's prediction history without mutating inputs.
@@ -131,18 +133,17 @@ def _prepare_stop_delay_updates(
                 f"{name} is missing required columns: {', '.join(missing)}"
             )
 
-    stop_ids = (
-        df_stops.loc[df_stops["stop_name"].eq(stop_name), "stop_id"]
-        .dropna()
-        .astype("string")
-    )
-    if stop_ids.empty:
-        raise ValueError(f"No GTFS stops were found with name {stop_name!r}.")
-
-    updates = df_trip_updates.loc[
-        df_trip_updates["trip_route_id"].astype("string").eq(str(route_id))
-        & df_trip_updates["stop_id"].astype("string").isin(stop_ids)
-    ].copy()
+    selected = df_trip_updates["trip_route_id"].astype("string").eq(str(route_id))
+    if stop_name is not None:
+        stop_ids = (
+            df_stops.loc[df_stops["stop_name"].eq(stop_name), "stop_id"]
+            .dropna()
+            .astype("string")
+        )
+        if stop_ids.empty:
+            raise ValueError(f"No GTFS stops were found with name {stop_name!r}.")
+        selected &= df_trip_updates["stop_id"].astype("string").isin(stop_ids)
+    updates = df_trip_updates.loc[selected].copy()
     if updates.empty:
         raise ValueError(
             f"No trip updates were found for route {route_id!r} "
@@ -190,7 +191,16 @@ def _prepare_stop_delay_updates(
     if "id" in updates.columns:
         order_columns.append("id")
     updates = updates.sort_values(order_columns, ascending=False, kind="stable")
-    updates["stop_name"] = stop_name
+    if stop_name is None:
+        stops = df_stops[["stop_id", "stop_name"]].copy()
+        stops["stop_id"] = stops["stop_id"].astype("string")
+        if stops["stop_id"].isna().any() or stops["stop_id"].duplicated().any():
+            raise ValueError("GTFS stops must have unique, nonmissing stop IDs.")
+        updates["stop_name"] = updates["stop_id"].map(
+            stops.set_index("stop_id")["stop_name"]
+        )
+    else:
+        updates["stop_name"] = stop_name
     updates["delay_minutes"] = updates["arrival_delay"] / 60.0
     return updates, visit_columns
 
