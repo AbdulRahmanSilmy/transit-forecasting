@@ -104,6 +104,42 @@ def _read_metadata(dataset_dir: Path) -> dict[str, Any]:
     return metadata
 
 
+def _get_available_dataset_directory(
+    cache_dir: str | Path,
+    dataset_id: str,
+) -> Path:
+    """Validate a dataset name and require an unoccupied destination.
+
+    Parameters
+    ----------
+    cache_dir : str or pathlib.Path
+        Parent directory containing saved backtest snapshots.
+    dataset_id : str
+        Single directory name using letters, digits, dots, dashes, or
+        underscores, starting with a letter or digit.
+
+    Returns
+    -------
+    pathlib.Path
+        Available dataset destination. No directory is created or reserved.
+
+    Raises
+    ------
+    ValueError
+        If the dataset ID is not a valid single directory name.
+    FileExistsError
+        If any directory, file, or symlink already occupies the destination.
+    """
+    if not isinstance(dataset_id, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]*", dataset_id
+    ):
+        raise ValueError("dataset_id must be a single nonempty directory name.")
+    destination = Path(cache_dir) / dataset_id
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError(f"Backtest dataset already exists: {destination}")
+    return destination
+
+
 def save_backtest_dataset(
     cache_dir: str | Path,
     df_vehicle_updates: pd.DataFrame,
@@ -153,19 +189,13 @@ def save_backtest_dataset(
     created_at = pd.Timestamp.now(tz="UTC")
     if dataset_id is None:
         dataset_id = created_at.strftime("%Y%m%dT%H%M%S%fZ")
-    if not isinstance(dataset_id, str) or not re.fullmatch(
-        r"[A-Za-z0-9][A-Za-z0-9._-]*", dataset_id
-    ):
-        raise ValueError("dataset_id must be a single nonempty directory name.")
+    destination = _get_available_dataset_directory(cache_dir, dataset_id)
     if lookback_hours is not None and (
         isinstance(lookback_hours, bool)
         or not isinstance(lookback_hours, int)
         or lookback_hours <= 0
     ):
         raise ValueError("lookback_hours must be a positive integer or None.")
-    destination = Path(cache_dir) / dataset_id
-    if destination.exists() or destination.is_symlink():
-        raise FileExistsError(f"Backtest dataset already exists: {destination}")
     static_dir = Path(static_data_dir)
     missing = [name for name in _REQUIRED_FILES if not (static_dir / name).is_file()]
     if missing:

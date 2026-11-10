@@ -307,7 +307,13 @@ def test_download_saves_once_then_reuses_both_feeds_offline(
     monkeypatch.setattr(backtest_data, "download_static_gtfs", static_download)
 
     saved = get_backtest_dataset(tmp_path / "data", source="download")
-    download.assert_called_once_with(lookback_hours=48, connection_parameters=None)
+    download.assert_called_once_with(
+        connection_parameters=None,
+        vehicle_query=None,
+        vehicle_query_params={"lookback_hours": 48},
+        trip_query=None,
+        trip_query_params={"lookback_hours": 48},
+    )
     static_download.assert_called_once_with(tmp_path / "data/static_gtfs_cache")
     download.side_effect = AssertionError("No second download")
     static_download.side_effect = AssertionError("No second GTFS download")

@@ -13,6 +13,7 @@ import mysql.connector
 import pandas as pd
 
 from .backtest_cache import (
+    _get_available_dataset_directory,
     list_backtest_datasets,
     load_backtest_dataset,
     save_backtest_dataset,
@@ -31,13 +32,13 @@ _REQUIRED_CONNECTION_KEYS = tuple(_CONNECTION_ENV_VARS)
 _VEHICLE_UPDATES_QUERY = """
 SELECT *
 FROM TRANSIT_VEHICLE_TABLE
-WHERE feed_timestamp >= NOW() - INTERVAL %s HOUR
+WHERE feed_timestamp >= NOW() - INTERVAL %(lookback_hours)s HOUR
 ORDER BY id DESC
 """
 _TRIP_UPDATES_QUERY = """
 SELECT *
 FROM TRANSIT_TRIP_TABLE
-WHERE feed_timestamp >= NOW() - INTERVAL %s HOUR
+WHERE feed_timestamp >= NOW() - INTERVAL %(lookback_hours)s HOUR
 ORDER BY id DESC
 """
 
@@ -114,8 +115,11 @@ def get_backtest_dataset(
     *,
     source: Literal["cache", "download"] = "cache",
     dataset_id: str | None = None,
-    lookback_hours: int = 48,
     env_file: str | Path | None = None,
+    vehicle_query: str | None = None,
+    vehicle_query_params: Mapping[str, Any] | None = None,
+    trip_query: str | None = None,
+    trip_query_params: Mapping[str, Any] | None = None,
 ) -> BacktestDataset:
     """Load a saved backtest or explicitly download and cache a new snapshot.
 
@@ -127,15 +131,32 @@ def get_backtest_dataset(
         Defaults to offline replay. Download mode fetches both realtime tables
         and current static GTFS, then publishes a new self-contained snapshot.
     dataset_id : str or None, optional
-        Saved dataset to select in cache mode. None selects the most recently
-        saved dataset, not necessarily the most recent data period. Ignored
-        in download mode, where each snapshot gets a new automatic ID.
-    lookback_hours : int, optional
-        Download window, default 48 hours. Only used in download mode.
+        Saved dataset to select in cache mode, or unique name for a new
+        snapshot in download mode. None selects the most recently saved
+        dataset in cache mode, not necessarily the most recent data period;
+        in download mode it generates a UTC timestamp ID. A supplied download
+        name is validated and checked for uniqueness before reading credentials
+        or making database/network calls. Use letters, digits, dots, dashes,
+        or underscores, starting with a letter or digit.
     env_file : str or pathlib.Path or None, optional
         Optional database settings file, read only in download mode.
         If absent, use the existing ``TRANSIT_DB_*`` environment variables.
         Settings are never written to the snapshot or process environment.
+    vehicle_query, trip_query : str or None, optional
+        SQL overrides for the vehicle and trip downloads, respectively.
+        Each defaults to the existing all-route query when None. Use named
+        placeholders such as ``%(lookback_hours)s`` for bound values. Select
+        the realtime columns required by the analysis, including
+        ``feed_timestamp`` for saving the snapshot. Queries are ignored in
+        cache mode; they do not filter an existing snapshot.
+    vehicle_query_params, trip_query_params : collections.abc.Mapping or None, optional
+        Independent named values for the corresponding SQL query. Mappings
+        are copied, not modified. For a default query, None supplies
+        ``{"lookback_hours": 48}``; an explicit mapping must include a positive
+        integer ``lookback_hours``. Custom queries receive only their supplied
+        values, with None meaning no parameters. Ignored in cache mode.
+        Snapshot metadata records a shared positive integer ``lookback_hours``
+        only when both mappings specify the same value; otherwise it is None.
 
     Returns
     -------
@@ -146,8 +167,12 @@ def get_backtest_dataset(
     ------
     FileNotFoundError
         If no cached datasets exist or the requested dataset is absent.
+    FileExistsError
+        If the requested download name is already occupied. The destination
+        is checked again when saving; existing snapshots are never overwritten.
     ValueError
-        If the source, downloaded inputs, settings, or cached files are invalid.
+        If the source, download name, downloaded inputs, settings, or cached
+        files are invalid.
     RuntimeError
         If database environment settings are missing in download mode.
     OSError
@@ -173,16 +198,47 @@ def get_backtest_dataset(
         directory = cache_dir / selected_id
         vehicle_updates, trip_updates = load_backtest_dataset(directory)
     elif source == "download":
-        vehicle_updates, trip_updates = download_backtest_data(
-            lookback_hours=lookback_hours,
-            connection_parameters=_connection_parameters_from_env_file(env_file),
+        if dataset_id is not None:
+            _get_available_dataset_directory(cache_dir, dataset_id)
+        vehicle_query_params = _get_query_parameters(
+            vehicle_query,
+            vehicle_query_params,
+            name="vehicle_query",
+            default_lookback_hours=48,
         )
+        trip_query_params = _get_query_parameters(
+            trip_query,
+            trip_query_params,
+            name="trip_query",
+            default_lookback_hours=48,
+        )
+        vehicle_updates, trip_updates = download_backtest_data(
+            connection_parameters=_connection_parameters_from_env_file(env_file),
+            vehicle_query=vehicle_query,
+            vehicle_query_params=vehicle_query_params,
+            trip_query=trip_query,
+            trip_query_params=trip_query_params,
+        )
+        lookbacks = [
+            parameters.get("lookback_hours") if parameters is not None else None
+            for parameters in (vehicle_query_params, trip_query_params)
+        ]
+        lookback_hours = None
+        if (
+            all(
+                isinstance(value, int) and not isinstance(value, bool) and value > 0
+                for value in lookbacks
+            )
+            and lookbacks[0] == lookbacks[1]
+        ):
+            lookback_hours = lookbacks[0]
         static_data_dir = download_static_gtfs(data_root / "static_gtfs_cache")
         directory = save_backtest_dataset(
             cache_dir,
             vehicle_updates,
             trip_updates,
             static_data_dir,
+            dataset_id=dataset_id,
             lookback_hours=lookback_hours,
             source="database",
         )
@@ -248,14 +304,71 @@ def _get_connection_parameters(
     return parameters
 
 
+def _get_query_parameters(
+    query: str | None,
+    query_params: Mapping[str, Any] | None,
+    *,
+    name: str,
+    default_lookback_hours: int,
+) -> dict[str, Any] | None:
+    """Validate SQL and copy its named parameters, resolving default values.
+
+    Parameters
+    ----------
+    query : str or None
+        Custom SQL, or None to use the corresponding default query.
+    query_params : collections.abc.Mapping or None
+        Named values to bind, or None for query-specific defaults.
+    name : str
+        Query argument name used in validation errors.
+    default_lookback_hours : int
+        Window used only when both query and query_params are None.
+
+    Returns
+    -------
+    dict[str, Any] or None
+        Independent parameters, or None for parameterless custom SQL.
+
+    Raises
+    ------
+    ValueError
+        If the query, mapping keys, or default-query lookback are invalid.
+    """
+    if query is not None and (not isinstance(query, str) or not query.strip()):
+        raise ValueError(f"{name} must be a nonempty SQL string or None.")
+    if query_params is None:
+        return {"lookback_hours": default_lookback_hours} if query is None else None
+    if not isinstance(query_params, Mapping) or any(
+        not isinstance(key, str) for key in query_params
+    ):
+        raise ValueError(f"{name}_params must be a mapping with string keys or None.")
+    parameters = dict(query_params)
+    if query is None:
+        lookback_hours = parameters.get("lookback_hours")
+        if (
+            isinstance(lookback_hours, bool)
+            or not isinstance(lookback_hours, int)
+            or lookback_hours <= 0
+        ):
+            raise ValueError(
+                f"{name}_params must contain a positive integer lookback_hours "
+                "for the default query."
+            )
+    return parameters
+
+
 def download_backtest_data(
-    lookback_hours: int = 3,
     connection_parameters: Mapping[str, Any] | None = None,
+    *,
+    vehicle_query: str | None = None,
+    vehicle_query_params: Mapping[str, Any] | None = None,
+    trip_query: str | None = None,
+    trip_query_params: Mapping[str, Any] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Download recent vehicle and trip updates from the transit database.
 
-    The query window is measured relative to the database server's current
-    time. Connection parameters are read from ``TRANSIT_DB_HOST``,
+    Default query windows are measured relative to the database server's
+    current time. Connection parameters are read from ``TRANSIT_DB_HOST``,
     ``TRANSIT_DB_USER``, ``TRANSIT_DB_PASSWORD``, ``TRANSIT_DB_NAME``, and
     ``TRANSIT_DB_PORT`` unless supplied explicitly.
 
@@ -265,45 +378,62 @@ def download_backtest_data(
 
     Parameters
     ----------
-    lookback_hours : int, optional
-        Number of hours of recent updates to download. Defaults to ``3``.
     connection_parameters : collections.abc.Mapping or None, optional
         MySQL connection parameters accepted by ``mysql.connector.connect``.
         When omitted, the ``TRANSIT_DB_*`` environment variables are used.
+    vehicle_query, trip_query : str or None, optional
+        SQL overrides for each table. None uses the existing query selecting
+        all columns and routes within the lookback window, newest ID first.
+        Include the desired time window, filters, columns, and ordering in
+        custom SQL, using named placeholders such as ``%(route_id)s``.
+    vehicle_query_params, trip_query_params : collections.abc.Mapping or None, optional
+        Independent named values bound by the database driver to each query.
+        Mappings are copied, not modified. For a default query, None supplies
+        ``{"lookback_hours": 3}``; an explicit mapping must include a positive
+        integer ``lookback_hours``. For custom SQL, any named parameters are
+        supported and None means no parameters. Values are never interpolated
+        into the SQL by this function.
 
     Returns
     -------
     tuple[pandas.DataFrame, pandas.DataFrame]
-        Vehicle updates followed by trip updates, each ordered newest first
-        by the database row ID.
+        Vehicle updates followed by trip updates, in each query's result
+        order. Default queries order newest first by the database row ID.
 
     Raises
     ------
     ValueError
-        If ``lookback_hours`` is not a positive integer or connection
-        parameters are invalid.
+        If connection parameters, SQL strings, parameter mappings, or a
+        default query's ``lookback_hours`` value are invalid.
     RuntimeError
         If the required database environment variables are not set.
     mysql.connector.Error
         If connecting to or querying the database fails.
     """
-    if isinstance(lookback_hours, bool) or not isinstance(lookback_hours, int):
-        raise ValueError("lookback_hours must be a positive integer.")
-    if lookback_hours <= 0:
-        raise ValueError("lookback_hours must be a positive integer.")
-
+    vehicle_query_params = _get_query_parameters(
+        vehicle_query,
+        vehicle_query_params,
+        name="vehicle_query",
+        default_lookback_hours=3,
+    )
+    trip_query_params = _get_query_parameters(
+        trip_query,
+        trip_query_params,
+        name="trip_query",
+        default_lookback_hours=3,
+    )
     parameters = _get_connection_parameters(connection_parameters)
     connection = mysql.connector.connect(**parameters)
     try:
         df_vehicle_updates = pd.read_sql_query(
-            _VEHICLE_UPDATES_QUERY,
+            _VEHICLE_UPDATES_QUERY if vehicle_query is None else vehicle_query,
             connection,
-            params=(lookback_hours,),
+            params=vehicle_query_params,
         )
         df_trip_updates = pd.read_sql_query(
-            _TRIP_UPDATES_QUERY,
+            _TRIP_UPDATES_QUERY if trip_query is None else trip_query,
             connection,
-            params=(lookback_hours,),
+            params=trip_query_params,
         )
     finally:
         connection.close()

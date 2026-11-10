@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pandas as pd
 import pytest
@@ -63,10 +63,103 @@ def test_downloads_vehicle_and_trip_updates_and_closes_connection(monkeypatch) -
         }
     ]
     assert len(query_calls) == 2
-    assert "TRANSIT_VEHICLE_TABLE" in query_calls[0][0]
-    assert "TRANSIT_TRIP_TABLE" in query_calls[1][0]
-    assert all(call[2] == (3,) for call in query_calls)
+    assert query_calls[0][0] == backtest_data._VEHICLE_UPDATES_QUERY
+    assert query_calls[1][0] == backtest_data._TRIP_UPDATES_QUERY
+    assert all(call[2] == {"lookback_hours": 3} for call in query_calls)
     assert all(call[1] is connection for call in query_calls)
+    assert connection.closed
+
+
+@pytest.mark.parametrize("overrides", [(True, False), (False, True), (True, True)])
+def test_download_accepts_independent_query_overrides(monkeypatch, overrides) -> None:
+    connection = _FakeConnection()
+    vehicle, trip = pd.DataFrame({"id": [1]}), pd.DataFrame({"id": [2]})
+    queries = (
+        "SELECT * FROM TRANSIT_VEHICLE_TABLE "
+        "WHERE feed_timestamp >= NOW() - INTERVAL %(lookback_hours)s HOUR "
+        "AND trip_route_id = %(route_id)s "
+        "AND trip_direction_id = %(direction_id)s ORDER BY id DESC",
+        "SELECT * FROM TRANSIT_TRIP_TABLE WHERE id >= %(min_id)s ORDER BY id DESC",
+    )
+    query_params = (
+        {"lookback_hours": 168, "route_id": "97-KEL", "direction_id": 0},
+        {"min_id": 42},
+    )
+    read_sql = Mock(side_effect=(vehicle, trip))
+    monkeypatch.setattr(
+        backtest_data.mysql.connector, "connect", Mock(return_value=connection)
+    )
+    monkeypatch.setattr(backtest_data.pd, "read_sql_query", read_sql)
+
+    result = download_backtest_data(
+        connection_parameters={
+            "host": "example.test",
+            "user": "reader",
+            "password": "test-password",
+            "database": "transitdb",
+            "port": 3306,
+        },
+        vehicle_query=queries[0] if overrides[0] else None,
+        vehicle_query_params=query_params[0] if overrides[0] else None,
+        trip_query=queries[1] if overrides[1] else None,
+        trip_query_params=query_params[1] if overrides[1] else None,
+    )
+
+    assert result[0] is vehicle
+    assert result[1] is trip
+    defaults = (backtest_data._VEHICLE_UPDATES_QUERY, backtest_data._TRIP_UPDATES_QUERY)
+    assert read_sql.call_args_list == [
+        call(
+            queries[index] if overridden else defaults[index],
+            connection,
+            params=query_params[index] if overridden else {"lookback_hours": 3},
+        )
+        for index, overridden in enumerate(overrides)
+    ]
+    assert connection.closed
+
+
+@pytest.mark.parametrize("query_name", ["vehicle_query", "trip_query"])
+@pytest.mark.parametrize("query", ["", " \n", 1])
+def test_download_rejects_invalid_queries_before_connecting(
+    monkeypatch, query_name, query
+) -> None:
+    connect = Mock()
+    monkeypatch.setattr(backtest_data.mysql.connector, "connect", connect)
+
+    with pytest.raises(ValueError, match=query_name):
+        download_backtest_data(**{query_name: query})
+
+    connect.assert_not_called()
+
+
+@pytest.mark.parametrize("failing_query", [0, 1])
+def test_download_closes_connection_when_a_query_fails(
+    monkeypatch, failing_query
+) -> None:
+    connection = _FakeConnection()
+    monkeypatch.setattr(
+        backtest_data.mysql.connector, "connect", Mock(return_value=connection)
+    )
+    outcomes = [pd.DataFrame(), pd.DataFrame()]
+    outcomes[failing_query] = RuntimeError("Query failed")
+    monkeypatch.setattr(backtest_data.pd, "read_sql_query", Mock(side_effect=outcomes))
+
+    with pytest.raises(RuntimeError, match="Query failed"):
+        download_backtest_data(
+            connection_parameters={
+                "host": "example.test",
+                "user": "reader",
+                "password": "test-password",
+                "database": "transitdb",
+                "port": 3306,
+            },
+            vehicle_query="SELECT * FROM TRANSIT_VEHICLE_TABLE WHERE id >= %(min_id)s",
+            vehicle_query_params={"min_id": 1},
+            trip_query="SELECT * FROM TRANSIT_TRIP_TABLE WHERE id >= %(min_id)s",
+            trip_query_params={"min_id": 2},
+        )
+
     assert connection.closed
 
 
@@ -87,7 +180,7 @@ def test_download_requires_database_environment_variables(monkeypatch) -> None:
 @pytest.mark.parametrize("lookback_hours", [0, -1, 1.5, True])
 def test_download_rejects_invalid_lookback_hours(lookback_hours) -> None:
     with pytest.raises(ValueError, match="lookback_hours"):
-        download_backtest_data(lookback_hours=lookback_hours)
+        download_backtest_data(vehicle_query_params={"lookback_hours": lookback_hours})
 
 
 @pytest.mark.parametrize(
@@ -115,7 +208,14 @@ def test_get_dataset_selects_cache_without_credentials_or_downloads(
         Mock(side_effect=AssertionError("Cache must not download")),
     )
 
-    result = get_backtest_dataset(tmp_path, dataset_id=dataset_id)
+    result = get_backtest_dataset(
+        tmp_path,
+        dataset_id=dataset_id,
+        vehicle_query="ignored in cache mode",
+        vehicle_query_params={"lookback_hours": 168},
+        trip_query="ignored in cache mode",
+        trip_query_params={"min_id": 42},
+    )
 
     assert isinstance(result, BacktestDataset)
     assert result.directory == tmp_path / "backtests" / selected
@@ -187,20 +287,63 @@ def test_get_dataset_downloads_and_saves_matching_static_gtfs(
 ) -> None:
     download, static, save = dataset_downloads
 
-    result = get_backtest_dataset(tmp_path, source="download", lookback_hours=24)
+    result = get_backtest_dataset(
+        tmp_path,
+        source="download",
+        dataset_id="new-snapshot",
+        vehicle_query_params={"lookback_hours": 24},
+        trip_query_params={"lookback_hours": 24},
+    )
 
-    download.assert_called_once_with(lookback_hours=24, connection_parameters=None)
+    download.assert_called_once_with(
+        connection_parameters=None,
+        vehicle_query=None,
+        vehicle_query_params={"lookback_hours": 24},
+        trip_query=None,
+        trip_query_params={"lookback_hours": 24},
+    )
     static.assert_called_once_with(tmp_path / "static_gtfs_cache")
     save.assert_called_once_with(
         tmp_path / "backtests",
         *download.return_value,
         static.return_value,
+        dataset_id="new-snapshot",
         lookback_hours=24,
         source="database",
     )
     assert result.directory == save.return_value
     assert result.vehicle_updates is download.return_value[0]
     assert result.trip_updates is download.return_value[1]
+
+
+def test_get_dataset_forwards_custom_queries(tmp_path: Path, dataset_downloads) -> None:
+    vehicle_query = (
+        "SELECT * FROM TRANSIT_VEHICLE_TABLE "
+        "WHERE feed_timestamp >= NOW() - INTERVAL %(lookback_hours)s HOUR "
+        "AND trip_route_id = %(route_id)s AND trip_direction_id = %(direction_id)s"
+    )
+    vehicle_query_params = {
+        "lookback_hours": 168,
+        "route_id": "97-KEL",
+        "direction_id": 0,
+    }
+    trip_query = "SELECT * FROM TRANSIT_TRIP_TABLE"
+
+    get_backtest_dataset(
+        tmp_path,
+        source="download",
+        vehicle_query=vehicle_query,
+        vehicle_query_params=vehicle_query_params,
+        trip_query=trip_query,
+    )
+
+    dataset_downloads[0].assert_called_once_with(
+        connection_parameters=None,
+        vehicle_query=vehicle_query,
+        vehicle_query_params=vehicle_query_params,
+        trip_query=trip_query,
+        trip_query_params=None,
+    )
 
 
 def test_get_dataset_reads_file_overrides_without_changing_environment(
@@ -256,7 +399,11 @@ def test_get_dataset_missing_optional_file_uses_existing_environment(
     get_backtest_dataset(tmp_path, source="download", env_file=tmp_path / "absent.env")
 
     dataset_downloads[0].assert_called_once_with(
-        lookback_hours=48, connection_parameters=None
+        connection_parameters=None,
+        vehicle_query=None,
+        vehicle_query_params={"lookback_hours": 48},
+        trip_query=None,
+        trip_query_params={"lookback_hours": 48},
     )
 
 
