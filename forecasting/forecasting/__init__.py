@@ -51,6 +51,7 @@ from .stop_congestion_display import (
     make_stop_congestion_cohort_figures,
     make_stop_congestion_example,
 )
+from .stop_dynamics_eda import StopDynamicsEDA, prepare_stop_dynamics_eda
 from .trip_updates import (
     get_latest_stop_delays,
     get_stop_delay_horizons,
@@ -64,6 +65,7 @@ __all__ = [
     "DelayModelConfig",
     "SegmentDelayData",
     "StopCongestionAnalysis",
+    "StopDynamicsEDA",
     "compute_delay_anomalies",
     "download_backtest_data",
     "download_static_gtfs",
@@ -88,6 +90,7 @@ __all__ = [
     "prepare_congestion_snapshots",
     "prepare_delay_congestion_snapshots",
     "prepare_stop_congestion_analysis",
+    "prepare_stop_dynamics_eda",
     "prepare_segment_delay_data",
     "run_congestion_engine",
     "run_delay_congestion_engine",
