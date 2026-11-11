@@ -30,6 +30,17 @@ from .road_segment_delay_congestion import (
     DelayCongestionResult,
     run_delay_congestion_engine,
 )
+from .segment_delay_model import (
+    DelayModelConfig,
+    SegmentDelayData,
+    make_segment_delay_splits,
+    prepare_segment_delay_data,
+    run_segment_delay_experiment,
+    save_segment_delay_experiment,
+    segment_delay_metrics,
+    summarize_segment_delay_uplift,
+)
+from .segment_traversal_speed import get_segment_traversal_speeds
 from .static_gtfs import download_static_gtfs
 from .stop_congestion_analysis import (
     StopCongestionAnalysis,
@@ -50,6 +61,8 @@ __all__ = [
     "BacktestDataset",
     "CongestionResult",
     "DelayCongestionResult",
+    "DelayModelConfig",
+    "SegmentDelayData",
     "StopCongestionAnalysis",
     "compute_delay_anomalies",
     "download_backtest_data",
@@ -58,6 +71,7 @@ __all__ = [
     "get_backtest_dataset",
     "get_congestion_service_activity",
     "get_latest_stop_delays",
+    "get_segment_traversal_speeds",
     "get_stop_delay_horizons",
     "get_trip_updates_for_trip",
     "list_backtest_datasets",
@@ -69,15 +83,21 @@ __all__ = [
     "make_stop_congestion_cohort_figures",
     "make_stop_congestion_example",
     "make_time_space_diagram",
+    "make_segment_delay_splits",
     "order_route_segments",
     "prepare_congestion_snapshots",
     "prepare_delay_congestion_snapshots",
     "prepare_stop_congestion_analysis",
+    "prepare_segment_delay_data",
     "run_congestion_engine",
     "run_delay_congestion_engine",
+    "run_segment_delay_experiment",
     "same_bus_propagation",
     "save_backtest_dataset",
+    "save_segment_delay_experiment",
     "select_delay_events",
     "summarize_propagation",
     "summarize_stop_congestion_signal",
+    "segment_delay_metrics",
+    "summarize_segment_delay_uplift",
 ]

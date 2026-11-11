@@ -3,6 +3,11 @@
 ## Overview
 Tools and data pipelines for transit forecasting and GTFS-realtime ingestion.
 
+## Notebooks
+
+See the [notebook guide](notebooks/README.md) for each analysis's purpose,
+recommended reading order, inputs, outputs and interpretation limits.
+
 ## Development Setup
 
 ### Python Environment
@@ -57,7 +62,13 @@ In **Download backtest data**, set:
   Leave `backtest_dataset_id = None` to use the newest saved snapshot, or set
   it to an ID from the displayed catalog to select any historical dataset.
 - `backtest_source = 'download'` to pull and save a new dataset. Set
-  `backtest_lookback_hours` as needed, then switch back to `'cache'` for reruns.
+  `lookback_hours` in each query's parameter dictionary as needed, then switch
+  back to `'cache'` for reruns. Set `backtest_dataset_id` to an unused name for
+  the new snapshot, or `None` for an automatic UTC timestamp ID. An existing
+  name raises `FileExistsError` before credentials are read or any database or
+  network download begins. Invalid directory names raise `ValueError` just as
+  early. Names may contain letters, digits, dots, dashes, and underscores and
+  must start with a letter or digit.
   This mode alone reads database credentials and fetches current static GTFS.
 
 Each dataset has UTC data bounds, row counts, creation time, source, requested
@@ -81,11 +92,118 @@ In download mode, the optional `env_file` supplies shell-style `TRANSIT_DB_*`
 settings; otherwise the existing environment is used. Cache mode never reads
 credentials. File settings do not modify the process environment.
 
+Download mode also accepts optional `vehicle_query` and `trip_query` SQL strings.
+Pass each query's named values separately through `vehicle_query_params` and
+`trip_query_params`. Values are bound by the database driver using named
+placeholders, so each query can have its own parameter names and values. For
+example, download a week for Route `97-KEL`, direction `0`:
+
+```python
+vehicle_query = """
+SELECT *
+FROM TRANSIT_VEHICLE_TABLE
+WHERE feed_timestamp >= NOW() - INTERVAL %(lookback_hours)s HOUR
+  AND trip_route_id = %(route_id)s
+  AND trip_direction_id = %(direction_id)s
+ORDER BY id DESC
+"""
+vehicle_query_params = {
+    "lookback_hours": 7 * 24,
+    "route_id": "97-KEL",
+    "direction_id": 0,
+}
+trip_query = vehicle_query.replace("TRANSIT_VEHICLE_TABLE", "TRANSIT_TRIP_TABLE")
+trip_query_params = {
+    "lookback_hours": 7 * 24,
+    "route_id": "97-KEL",
+    "direction_id": 0,
+}
+dataset = get_backtest_dataset(
+    "data",
+    source="download",
+    dataset_id="route97_direction0_week",
+    env_file=".env.road_segment_congestion",
+    vehicle_query=vehicle_query,
+    vehicle_query_params=vehicle_query_params,
+    trip_query=trip_query,
+    trip_query_params=trip_query_params,
+)
+```
+
+Omitting either query, or passing `None`, keeps that table's existing all-route
+query. Its parameter dictionary defaults to `{"lookback_hours": 48}`; supplying
+one explicitly requires a positive integer `lookback_hours`. The same query
+and dictionary arguments are available on `download_backtest_data`, whose
+default queries retain their 3-hour window. A custom query receives only its
+supplied parameters; use `None` or `{}` for SQL without placeholders. These
+APIs no longer accept a separate `lookback_hours` argument.
+
+Custom queries must return `feed_timestamp` to save a snapshot and the columns
+needed by the analysis. The manifest's requested lookback is recorded only
+when both dictionaries contain the same positive integer `lookback_hours`;
+otherwise it is null, while actual UTC data bounds remain available for each
+table. SQL and parameter overrides only affect new downloads; cache mode
+loads the selected snapshot as saved.
+
 Lower-level `save_backtest_dataset`, `load_backtest_dataset`, and
 `list_backtest_datasets` utilities remain available from `forecasting`. Pickle
 snapshots preserve DataFrame dtypes and order, but must only be loaded from
 trusted sources. All of `data/` remains ignored by Git; no credentials are
 stored in snapshots.
+
+## Database Download Scaling Benchmark
+
+The [download benchmark](forecasting/forecasting/benchmark_download_speed.py)
+uses the same filtered realtime download pattern as the
+[speed-based congestion notebook](notebooks/road_segment_congestion.ipynb):
+Route `97-KEL`, direction `0`, both realtime tables, all columns, and
+`ORDER BY id DESC`. Run from the repository root:
+
+```bash
+conda run --no-capture-output -n transit_env python -m forecasting.benchmark_download_speed
+```
+
+It reads the same ignored `.env.road_segment_congestion` file or existing
+`TRANSIT_DB_*` variables. Default windows are **1, 2, 4, 8, 12, 24, 48, 72, 96,
+120, 144, and 168 hours**, with three full downloads per window. The first
+sweep increases in size; subsequent sweeps use a reproducible shuffled order
+to reduce systematic ordering effects. This can transfer substantial data
+and load the database; it never changes data or flushes server caches.
+For a shorter single-sweep run:
+
+```bash
+conda run --no-capture-output -n transit_env python -m forecasting.benchmark_download_speed \
+  --hours 1 6 24 72 168 --repeats 1
+```
+
+Results go to a new timestamped directory under `data/download_benchmarks/`:
+
+- `timings.csv`: every trial, including both row counts, elapsed seconds,
+  filters, and fixed server-time window bounds. Completed trials are flushed
+  after each download, so a failed/interrupted run preserves earlier timings.
+- `summary.csv`: medians, observed minimum/maximum timings, and time per row.
+- `scaling.html`: self-contained interactive plot; open it in a browser.
+  Override the destination with `--output-dir <new-directory>`; existing
+  directories are rejected to protect previous results.
+
+The timer covers the same `download_backtest_data` path as the notebook:
+connection setup, both SQL queries, sorting, network transfer, DataFrame
+construction, and connection close. It excludes static GTFS downloads,
+snapshot serialization, CSV writes, and plotting. Each window ends at the
+same database `NOW()` captured before timing. Normal live ingestion cannot
+extend that endpoint, although late backfills/deletions can change counts.
+Only one pair of DataFrames is kept in memory at a time.
+
+Use **returned vehicle + trip rows**, not hours, as n: transit activity varies
+by hour. The plot compares median elapsed time with an O(n) line anchored at
+the smallest nonempty window, and shows milliseconds per row. Sustained
+growth in time per row is evidence of superlinear behavior over these sampled
+sizes. A descriptive log-log exponent p above 1 is another indication, not
+proof of asymptotic complexity or statistical significance. Bars show observed
+min/max, not confidence intervals. Fixed connection overhead, server load,
+cache warming, different table mixes, and query plans can affect results.
+Empty windows are reported and excluded from per-row/exponent calculations;
+an all-empty run raises an error rather than producing a misleading plot.
 
 ## Congestion Maps
 
@@ -138,6 +256,24 @@ The latest map stays anchored at the recording end even when coverage has
 expired; it never silently substitutes an earlier good reading.
 
 ### Speed-based congestion replay
+
+The notebook keeps two separate speed-comparison plots. The original shows
+time-binned mean probe speeds against the engine's median individual probe-speed
+baseline. Select its segment with `probe_speed_segment_id`; a marker represents
+a time bin, not an individual bus.
+
+The per-bus plot uses `get_segment_traversal_speeds` to show one marker
+per completed bus/trip-instance traversal, at its final reported downstream
+arrival. Select its segment independently with `speed_segment_id`.
+Speed is the segment's shape-path distance divided by the time from
+upstream departure to downstream arrival, excluding upstream dwell. Hover labels
+identify the bus, trip instance, path distance, and travel time. Missing final
+times, ambiguous bus identities, and unfinished traversals are excluded with
+warnings, never replaced with older predictions or instantaneous speed averages.
+The comparison baseline is the median of these full-traversal speeds for the
+selected directed segment and shape; it does not change the congestion engine's
+probe-speed baseline. Both stop-time estimates and shape-derived distances are
+proxies, and the full-period traversal median is not a past-only forecast.
 
 `prepare_congestion_snapshots` selects the latest already-observed congestion
 estimate at each requested UTC timestamp. An aggregate becomes available at its
@@ -222,6 +358,56 @@ validation. The final reported arrival/delay is a reference proxy, not measured
 ground truth; descriptive association does not demonstrate forecast improvement.
 Missing static trip/shape matches are warned about and excluded, never mapped
 to another trip or shape.
+
+## Recurring Segment Delay Prediction
+
+The separate [segment delay modelling notebook](notebooks/road_segment_delay_prediction.ipynb)
+tests whether calendar patterns predict signed downstream-minus-upstream arrival
+delay changes on Route `97-KEL`, direction `0`. It explicitly replays the
+`2026-11-10_2_months` snapshot offline, using each traversal's own **scheduled**
+upstream arrival time, local weekday and categorical directed segment identity.
+Final-reported arrival delays are proxies that include dwell, holding and
+schedule slack, not independently measured road traffic.
+
+Run with the `transit_env` kernel. Install declared model dependencies from the
+repository root if needed:
+
+```bash
+conda run -n transit_env python -m pip install -e ./forecasting
+```
+
+`prepare_segment_delay_data` reuses the audited delay engine, joins exact trip
+stop sequences, handles extended GTFS times and DST, and excludes recording-edge
+service days. `make_segment_delay_splits` builds **two seven-day expanding
+development blocks and a final seven-day holdout**, with a one-service-day
+training gap and label-availability/trip-boundary guards. The initially planned
+four development weeks were reduced after auditing sparse early static-GTFS
+matches; the first retained training block has 22 observed days. Insufficient
+coverage raises an error rather than silently changing the design.
+
+`run_segment_delay_experiment` compares L1-loss XGBoost with ordinary
+segment/weekday/30-minute arithmetic averages, training-winsorised averages,
+robust segment-only averages and zero change. Sparse calendar groups require
+five observations across three service days, with explicit segment/time,
+segment and global fallbacks. All feature fitting and model selection use
+training/development history only; final-test labels are never used for fitting.
+
+MAE, median absolute error, RMSE, R-squared, macro-segment MAE, support and
+paired daily/segment improvements describe the result. Unchanged held-out
+targets are scored for **all observations**, and separately within
+training-only conditional residual bands and their tails (95% and 99%
+sensitivity). There are no verified incident labels: these masks are
+retrospective diagnostics, not an anomaly detector. Unexpected-delay magnitudes
+are downweighted through robust training, not hidden by clipping test outcomes.
+Calendar-model improvement beyond fixed segment corrections and consistency
+across held-out weeks are more relevant than feature importance alone.
+
+Running the notebook produces tables and figures. `save_segment_delay_experiment`
+saves a non-overwriting run under ignored `data/segment_delay_models/`, including
+the pre-test model bundle, snapshot manifest/checksums, versions/configuration,
+segment mapping, split/audit tables, tuning results, out-of-time predictions
+and metrics. Load pickle bundles only from trusted sources. This experiment
+does not modify the live delay estimator or the reference notebook.
 
 ## Data Ingestion
 The ingestion scripts live under [data_ingestion/](data_ingestion), and [data_ingestion/config.yaml](data_ingestion/config.yaml) defines the configuration. It pulls environmental variables from a `.env` file. To run the code, use [.env.example](data_ingestion/.env.example) as a reference for what to include in your `.env` file.
