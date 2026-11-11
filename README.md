@@ -37,7 +37,7 @@ pre-commit install
 
 ## Historical Backtests
 
-The [road-segment congestion notebook](notebooks/road_segment_congestion.ipynb)
+The [road-segment congestion notebook](notebooks/route_97_speed_congestion_analysis.ipynb)
 stores complete local datasets instead of repeatedly querying the database:
 
 ```text
@@ -155,7 +155,7 @@ stored in snapshots.
 
 The [download benchmark](forecasting/forecasting/benchmark_download_speed.py)
 uses the same filtered realtime download pattern as the
-[speed-based congestion notebook](notebooks/road_segment_congestion.ipynb):
+[speed-based congestion notebook](notebooks/route_97_speed_congestion_analysis.ipynb):
 Route `97-KEL`, direction `0`, both realtime tables, all columns, and
 `ORDER BY id DESC`. Run from the repository root:
 
@@ -209,7 +209,7 @@ an all-empty run raises an error rather than producing a misleading plot.
 
 ### Congestion via arrival-delay changes
 
-The [delay-based notebook](notebooks/road_segment_congestion_via_delays.ipynb)
+The [delay-based notebook](notebooks/route_97_delay_congestion_and_propagation.ipynb)
 reuses the original notebook's cached-backtest workflow for Route `97-KEL`
 and direction `0`, without changing the speed-based analysis. Select the
 saved snapshot explicitly with `backtest_dataset_id` in the notebook.
@@ -326,7 +326,7 @@ animation frame; smoothed values are intentionally different.
 
 ## Stop-delay Congestion Feasibility Analysis
 
-The [road-segment congestion notebook](notebooks/road_segment_congestion.ipynb)
+The [road-segment congestion notebook](notebooks/route_97_speed_congestion_analysis.ipynb)
 includes an offline EDA comparison at the selected stop, direction 0. It contrasts
 BC Transit's remaining prediction error with historically available congestion
 on each trip's own upstream path, including the incoming segment to the stop.
@@ -361,7 +361,7 @@ to another trip or shape.
 
 ## Recurring Segment Delay Prediction
 
-The separate [segment delay modelling notebook](notebooks/road_segment_delay_prediction.ipynb)
+The separate [segment delay modelling notebook](notebooks/route_97_recurring_segment_delay_prediction.ipynb)
 tests whether calendar patterns predict signed downstream-minus-upstream arrival
 delay changes on Route `97-KEL`, direction `0`. It explicitly replays the
 `2026-11-10_2_months` snapshot offline, using each traversal's own **scheduled**

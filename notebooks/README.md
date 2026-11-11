@@ -9,11 +9,11 @@ research workflows, not a deployed arrival-prediction service.
 
 | Notebook | Question and purpose | Main results |
 | --- | --- | --- |
-| [check_dataset_size.ipynb](check_dataset_size.ipynb) | How much storage do the realtime MySQL tables use? Runs `ANALYZE TABLE` and reads data-plus-index sizes from `information_schema`. | Database table storage sizes, not the size of a filtered backtest snapshot. |
-| [dev_use_case.ipynb](dev_use_case.ipynb) | How could vehicle positions, schedules and reported delays support forecasting? Broad prototype covering maps, bus animations, speed-based congestion, stop-delay case studies and an arrival-delay model comparison. | Exploratory plots and baseline-versus-congestion-feature backtests. Prefer the focused notebooks below for the package-backed analyses. |
-| [road_segment_congestion.ipynb](road_segment_congestion.ipynb) | What do vehicle speed probes say about Route 97 congestion, and could upstream congestion explain remaining stop-delay prediction error? | Directed segment geometry, speed comparisons, fresh/stale maps, animations, probe support and stop-delay feasibility dashboards. |
-| [road_segment_congestion_via_delays.ipynb](road_segment_congestion_via_delays.ipynb) | Where do Route 97 buses gain or recover delay, and do unusual delays persist locally or propagate? | Audited stop-to-stop delay changes, coverage, replay maps, event responses, same-bus carry-over and time-space diagrams. |
-| [road_segment_delay_prediction.ipynb](road_segment_delay_prediction.ipynb) | Can scheduled time-of-day and weekday patterns predict recurring signed segment delay changes? | Calendar-average and XGBoost comparisons, blocked validation, a final held-out week, tail diagnostics and saved model/evaluation bundles. |
+| [database_table_storage_profile.ipynb](database_table_storage_profile.ipynb) | How much storage do the realtime MySQL tables use? Runs `ANALYZE TABLE` and reads data-plus-index sizes from `information_schema`. | Database table storage sizes, not the size of a filtered backtest snapshot. |
+| [transit_forecasting_prototype.ipynb](transit_forecasting_prototype.ipynb) | How could vehicle positions, schedules and reported delays support forecasting? Broad prototype covering maps, bus animations, speed-based congestion, stop-delay case studies and an arrival-delay model comparison. | Exploratory plots and baseline-versus-congestion-feature backtests. Prefer the focused notebooks below for the package-backed analyses. |
+| [route_97_speed_congestion_analysis.ipynb](route_97_speed_congestion_analysis.ipynb) | What do vehicle speed probes say about Route 97 congestion, and could upstream congestion explain remaining stop-delay prediction error? | Directed segment geometry, speed comparisons, fresh/stale maps, animations, probe support and stop-delay feasibility dashboards. |
+| [route_97_delay_congestion_and_propagation.ipynb](route_97_delay_congestion_and_propagation.ipynb) | Where do Route 97 buses gain or recover delay, and do unusual delays persist locally or propagate? | Audited stop-to-stop delay changes, coverage, replay maps, event responses, same-bus carry-over and time-space diagrams. |
+| [route_97_recurring_segment_delay_prediction.ipynb](route_97_recurring_segment_delay_prediction.ipynb) | Can scheduled time-of-day and weekday patterns predict recurring signed segment delay changes? | Calendar-average and XGBoost comparisons, blocked validation, a final held-out week, tail diagnostics and saved model/evaluation bundles. |
 
 ## Recommended reading order
 
@@ -78,8 +78,16 @@ treated as conclusions for a newly selected snapshot.
 The two legacy notebooks query MySQL directly and assume additional local
 files and connection settings. They are not offline replay workflows. The
 storage-size notebook runs `ANALYZE TABLE`, so it is not a read-only inspection
-and should only be run against an appropriate database. Keep credentials out
-of Git; clean up the legacy connection settings before shared reuse.
+and should only be run against an appropriate database.
+
+All legacy database connection cells read the required password from
+`TRANSIT_DB_PASSWORD`; no password is embedded in notebook source. Export it
+in the shell before launching Jupyter so the kernel inherits it, or source
+the project's ignored database environment file. A missing variable raises
+`KeyError` before any database connection is attempted. The host, username,
+database and port remain explicit in each cell; review these settings before
+running against a different database. Never put credentials in notebook cells
+or saved outputs.
 
 ## What the signals mean
 

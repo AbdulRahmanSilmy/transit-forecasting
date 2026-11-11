@@ -237,7 +237,8 @@ def test_rejects_missing_or_invalid_feed_timestamps(
 
 def _notebook_cell(cell_id: str) -> str:
     notebook_path = (
-        Path(__file__).resolve().parents[3] / "notebooks/road_segment_congestion.ipynb"
+        Path(__file__).resolve().parents[3]
+        / "notebooks/route_97_speed_congestion_analysis.ipynb"
     )
     notebook = json.loads(notebook_path.read_text())
     return "".join(
