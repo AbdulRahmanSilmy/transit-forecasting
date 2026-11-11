@@ -40,6 +40,8 @@ helper functions defined inside the notebook.
    Validate notebook syntax/schema and run focused package tests. Preserve
    unrelated outputs and do not rerun expensive or network-dependent cells
    unnecessarily.
+9. When checking Plotly rendering or interactions in a browser, also follow
+   [Plotly Browser Validation](../plotly-browser-validation/SKILL.md).
 
 ## Readability Check
 
