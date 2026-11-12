@@ -55,13 +55,17 @@ from .stop_congestion_display import (
     make_stop_congestion_cohort_figures,
     make_stop_congestion_example,
 )
-from .stop_dynamics_display import make_segment_timing_figure
+from .stop_dynamics_display import (
+    make_segment_timing_figure,
+    make_stop_dynamics_model_figure,
+)
 from .stop_dynamics_eda import (
     SegmentTimingEDA,
     StopDynamicsEDA,
     prepare_segment_timing_eda,
     prepare_stop_dynamics_eda,
 )
+from .stop_dynamics_model import StopDynamicsModel, fit_stop_dynamics_model
 from .trip_dynamics_display import make_trip_dynamics_figure
 from .trip_dynamics_eda import (
     TripDynamicsEDA,
@@ -83,12 +87,14 @@ __all__ = [
     "SegmentTimingEDA",
     "StopCongestionAnalysis",
     "StopDynamicsEDA",
+    "StopDynamicsModel",
     "TripDynamicsEDA",
     "build_route_segments",
     "compute_delay_anomalies",
     "download_backtest_data",
     "download_static_gtfs",
     "event_space_time_response",
+    "fit_stop_dynamics_model",
     "get_backtest_dataset",
     "get_congestion_service_activity",
     "get_latest_stop_delays",
@@ -104,6 +110,7 @@ __all__ = [
     "make_stop_congestion_cohort_figures",
     "make_stop_congestion_example",
     "make_segment_timing_figure",
+    "make_stop_dynamics_model_figure",
     "make_time_space_diagram",
     "make_trip_dynamics_figure",
     "make_segment_delay_splits",

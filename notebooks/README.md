@@ -14,6 +14,7 @@ research workflows, not a deployed arrival-prediction service.
 | [route_97_speed_congestion_analysis.ipynb](route_97_speed_congestion_analysis.ipynb) | What do vehicle speed probes say about Route 97 congestion, and could upstream congestion explain remaining stop-delay prediction error? | Directed segment geometry, speed comparisons, fresh/stale maps, animations, probe support and stop-delay feasibility dashboards. |
 | [route_97_delay_congestion_and_propagation.ipynb](route_97_delay_congestion_and_propagation.ipynb) | Where do Route 97 buses gain or recover delay, and do unusual delays persist locally or propagate? | Audited stop-to-stop delay changes, coverage, replay maps, event responses, same-bus carry-over and time-space diagrams. |
 | [route_97_recurring_segment_delay_prediction.ipynb](route_97_recurring_segment_delay_prediction.ipynb) | Can scheduled time-of-day and weekday patterns predict recurring signed segment delay changes? | Calendar-average and XGBoost comparisons, blocked validation, a final held-out week, tail diagnostics and saved model/evaluation bundles. |
+| [dynamics_model.ipynb](dynamics_model.ipynb) | How do same-journey upstream delay, traversal and upstream dwell relate to downstream delay on Highway 97 segment 4? | Shared preprocessing, coverage/journey EDA, a fitted stop-to-stop equation with training-only hourly baselines, and evaluation on the last seven observed arrival days. Uses completed feed estimates, not pre-arrival forecasting inputs. |
 
 ## Recommended reading order
 
@@ -24,6 +25,13 @@ research workflows, not a deployed arrival-prediction service.
    existing lateness from delay gained or recovered on a segment.
 3. Run the recurring segment-delay prediction experiment to test the calendar
    hypothesis on held-out service days.
+4. Use the dynamics notebook to inspect individual journeys and fit the
+   retrospective segment 4 equation. Run its Preprocessing section first;
+   EDA and Modelling can then be run independently. Coefficients, hourly
+   baselines/support, audit, metadata, metrics and predictions are saved as
+   CSV alongside HTML plots under `visuals/dynamics_model_notebook/`.
+   This notebook pins the two-month cache and runs offline from either the
+   repository root or the notebooks directory.
 
 The database-size notebook is an optional capacity check. The broad prototype
 provides development context but is not required by the other notebooks.
@@ -105,6 +113,15 @@ or saved outputs.
   scheduled upstream arrival, weekday and directed segment identity. It does
   not forecast unexpected incidents or consume actual endpoint delays as
   inputs.
+- **Retrospective dynamics equation:** downstream arrival delay fitted from
+  the same dated journey's upstream arrival delay and deviations of completed
+  traversal/upstream dwell from training-only hourly medians. The hourly
+  reference clock is Vancouver local upstream arrival. Missing training hours
+  use explicitly labelled global training medians. The last seven observed
+  local destination-arrival days are held out; training endpoint publications
+  must precede that boundary and training/holdout journeys cannot overlap.
+  Completed traversal includes the target arrival timestamp, so chronological
+  separation does not make this an operational forecasting evaluation.
 
 Final reported times and delays are reference proxies, not independently
 measured arrivals. Delay changes include dwell, holding, schedule slack and

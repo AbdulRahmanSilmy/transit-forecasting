@@ -9,6 +9,119 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from .stop_dynamics_eda import SegmentTimingEDA, StopDynamicsEDA
+from .stop_dynamics_model import StopDynamicsModel
+
+
+def make_stop_dynamics_model_figure(
+    result: StopDynamicsModel,
+    *,
+    split: str = "holdout",
+    display_timezone: str = "America/Vancouver",
+) -> go.Figure:
+    """Compare reported/fitted delays and residuals for one model split.
+
+    Parameters
+    ----------
+    result : StopDynamicsModel
+        Fitted model with individual training and holdout predictions.
+    split : {"train", "holdout"}, default "holdout"
+        Visits to display without changing the fitted model.
+    display_timezone : str, default "America/Vancouver"
+        Timezone for destination-arrival timestamps.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        Two shared-time rows in minutes, with independent vertical zoom.
+        No plot is shown or saved; inputs are not modified.
+
+    Raises
+    ------
+    ValueError
+        If the split is invalid or contains no visits.
+    """
+    if split not in ("train", "holdout"):
+        raise ValueError("split must be 'train' or 'holdout'.")
+    visits = result.observations.loc[
+        result.observations["split"].eq(split)
+    ].sort_values("arrival_time")
+    if visits.empty:
+        raise ValueError(f"No visits available for model split {split!r}.")
+    times = visits["arrival_time"].dt.tz_convert(display_timezone).tolist()
+    label = "Training" if split == "train" else "Held-out"
+    figure = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.12,
+        subplot_titles=(
+            f"{label} reported and fitted arrival delays",
+            "Residual: reported minus fitted",
+        ),
+    )
+    for column, name, color in (
+        ("arrival_delay", "Reported delay", "black"),
+        ("predicted_delay_seconds", "Fitted equation", "royalblue"),
+        ("persistence_delay_seconds", "Upstream persistence", "darkorange"),
+    ):
+        figure.add_trace(
+            go.Scattergl(
+                x=times,
+                y=visits[column] / 60,
+                mode="markers",
+                name=name,
+                marker=dict(color=color, size=6, opacity=0.65),
+                customdata=visits[
+                    ["trip_instance_key", "stop_sequence", "baseline_source"]
+                ],
+                hovertemplate=(
+                    "%{x}<br>Journey: %{customdata[0]}"
+                    "<br>Stop sequence: %{customdata[1]}<br>Baseline: %{customdata[2]}"
+                    "<br>Delay: %{y:.2f} min<extra>%{fullData.name}</extra>"
+                ),
+            ),
+            row=1,
+            col=1,
+        )
+    figure.add_trace(
+        go.Scattergl(
+            x=times,
+            y=visits["residual_seconds"] / 60,
+            mode="markers",
+            name="Equation residual",
+            marker=dict(color="firebrick", size=6),
+            customdata=visits[["trip_instance_key"]],
+            hovertemplate=(
+                "%{x}<br>Journey: %{customdata[0]}"
+                "<br>Residual: %{y:.2f} min<extra></extra>"
+            ),
+        ),
+        row=2,
+        col=1,
+    )
+    figure.add_hline(y=0, line_dash="dot", line_color="gray", row=2, col=1)
+    figure.update_yaxes(title_text="Arrival delay (min)", row=1, col=1)
+    figure.update_yaxes(title_text="Residual (min)", row=2, col=1)
+    figure.update_yaxes(fixedrange=False)
+    figure.update_xaxes(
+        title_text=f"Destination arrival ({display_timezone})",
+        row=2,
+        col=1,
+    )
+    segment = result.segment
+    figure.update_layout(
+        title=(
+            f"Segment {segment['segment_id']}, direction "
+            f"{segment['trip_direction_id']}: retrospective dynamics "
+            f"{'training' if split == 'train' else 'holdout'}"
+        ),
+        height=850,
+        hovermode="x unified",
+        hoversubplots="axis",
+        legend=dict(orientation="h", x=0, y=-0.18, yanchor="top"),
+        margin=dict(t=110, b=160),
+    )
+    return figure
 
 
 def make_segment_timing_figure(
