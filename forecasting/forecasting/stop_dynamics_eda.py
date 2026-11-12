@@ -45,6 +45,11 @@ class StopDynamicsEDA:
     coverage : pandas.DataFrame
         Daily UTC candidate/matched update and usable visit/pair counts.
         Raw publication counts and final arrival counts have different clocks.
+    recording_start, recording_end : pandas.Timestamp
+        First publication in either feed and last trip-update publication (UTC).
+        The latter bounds completed stop events, independently of vehicle probes.
+    time_bin_size : str
+        Fixed UTC bin duration used by the preparation.
     """
 
     segment: pd.Series
@@ -55,6 +60,37 @@ class StopDynamicsEDA:
     delay_bins: pd.DataFrame
     audit: pd.DataFrame
     coverage: pd.DataFrame
+    recording_start: pd.Timestamp
+    recording_end: pd.Timestamp
+    time_bin_size: str
+
+
+@dataclass(frozen=True)
+class SegmentTimingEDA:
+    """Non-overlapping incoming traversal and upstream-stop dwell proxies.
+
+    Attributes
+    ----------
+    segment : pandas.Series
+        Directed, shape-specific segment metadata from ``StopDynamicsEDA``.
+    observations : pandas.DataFrame
+        Latest destination visits and their exact upstream endpoints (UTC).
+        ``traversal_seconds`` spans upstream departure to destination arrival;
+        ``dwell_seconds`` spans upstream arrival to upstream departure.
+        They have independent exclusion reasons; unavailable durations remain
+        missing. Both use destination arrival as their plotting/binning anchor.
+    bins : pandas.DataFrame
+        Complete UTC grid with duration medians, independent observation counts,
+        and full-snapshot baselines in seconds. Baselines weight each valid
+        visit once, not each publication or time-bin median.
+    audit : pandas.DataFrame
+        Counts by metric and mutually exclusive exclusion reason.
+    """
+
+    segment: pd.Series
+    observations: pd.DataFrame
+    bins: pd.DataFrame
+    audit: pd.DataFrame
 
 
 def _segment_catalogue(
@@ -217,6 +253,8 @@ def prepare_stop_dynamics_eda(
         Stop predictions with route/direction, trip/start/stop/sequence, feed
         time, arrival_time, and arrival_delay in seconds. Optional stop-level
         schedule_relationship flags 1 (skipped) and 2 (no data) exclude visits.
+        Optional departure_time is retained from the same latest row for
+        ``prepare_segment_timing_eda``; it is not required for delay analysis.
     stops, stop_times, trips : pandas.DataFrame
         Snapshot static GTFS. Stop coordinates and shapes are not required.
     route_id : str, optional
@@ -331,7 +369,12 @@ def prepare_stop_dynamics_eda(
     ):
         optional = [
             c
-            for c in ("id", "schedule_relationship", "trip_schedule_relationship")
+            for c in (
+                "id",
+                "schedule_relationship",
+                "trip_schedule_relationship",
+                "departure_time",
+            )
             if c in source
         ]
         selected = source.loc[
@@ -628,4 +671,207 @@ def prepare_stop_dynamics_eda(
         delay_bins=delay_bins,
         audit=audit,
         coverage=coverage,
+        recording_start=recording_start,
+        recording_end=trip_recording_end,
+        time_bin_size=time_bin_size,
     )
+
+
+def prepare_segment_timing_eda(analysis: StopDynamicsEDA) -> SegmentTimingEDA:
+    """Separate incoming traversal from upstream dwell using final estimates.
+
+    Upstream dwell spans upstream arrival to upstream departure; traversal
+    spans that departure to destination arrival. The intervals share only
+    their boundary, never elapsed time. Their sum is arrival-to-arrival elapsed
+    time. Arrival-delay change also accounts for the scheduled arrival interval,
+    so it is not simply the sum of these durations or their median deviations.
+    Destination departure is not used.
+
+    Reuse the already matched latest visits, including rows with missing
+    arrival delays. Validate timing independently of delay and independently
+    for each duration. No older estimate, schedule, or speed replaces a missing
+    endpoint. Inputs are not modified.
+
+    Parameters
+    ----------
+    analysis : StopDynamicsEDA
+        Prepared selected segment with optional ``departure_time`` retained
+        from trip updates. Exact recording bounds determine completed events.
+
+    Returns
+    -------
+    SegmentTimingEDA
+        Audited per-visit durations, complete UTC bins and full-snapshot medians.
+        Positive traversal and nonnegative dwell are eligible; reported zero
+        dwell is retained. Final feed estimates are not measured stop events.
+
+    Raises
+    ------
+    ValueError
+        If the input was prepared without departure-time fields or contains
+        invalid timestamp/relationship values.
+
+    Warns
+    -----
+    UserWarning
+        If durations are excluded or either metric has no usable observations.
+    """
+    _require_columns(analysis.upstream_visits, ("departure_time",), "upstream_visits")
+    observations = _segment_timing_observations(
+        analysis.stop_visits,
+        analysis.upstream_visits,
+        recording_start=analysis.recording_start,
+        recording_end=analysis.recording_end,
+    )
+    bins = pd.DataFrame(index=analysis.speed_bins.index)
+    audit_rows = []
+    for metric in ("traversal", "dwell"):
+        reasons = observations[f"{metric}_exclusion_reason"]
+        usable = observations.loc[reasons.eq("included")].copy()
+        usable["time_bin"] = usable["arrival_time"].dt.floor(analysis.time_bin_size)
+        grouped = usable.groupby("time_bin")[f"{metric}_seconds"]
+        bins[f"median_{metric}_seconds"] = grouped.median().reindex(bins.index)
+        bins[f"{metric}_count"] = (
+            grouped.count().reindex(bins.index, fill_value=0).astype("int64")
+        )
+        bins[f"baseline_{metric}_seconds"] = usable[f"{metric}_seconds"].median()
+        audit_rows.extend(
+            {"metric": metric, "reason": reason, "count": int(count)}
+            for reason, count in reasons.value_counts().items()
+        )
+    audit = pd.DataFrame(audit_rows, columns=["metric", "reason", "count"])
+    if (
+        audit["reason"].ne("included").any()
+        or bins["traversal_count"].sum() == 0
+        or bins["dwell_count"].sum() == 0
+    ):
+        warnings.warn(
+            "Some segment timings were excluded or have no usable observations; "
+            "inspect timing audit. Durations are final feed-estimate proxies.",
+            UserWarning,
+            stacklevel=2,
+        )
+    return SegmentTimingEDA(
+        segment=analysis.segment.copy(),
+        observations=observations,
+        bins=bins,
+        audit=audit,
+    )
+
+
+def _segment_timing_observations(
+    current: pd.DataFrame,
+    preceding: pd.DataFrame,
+    *,
+    recording_start: pd.Timestamp,
+    recording_end: pd.Timestamp,
+) -> pd.DataFrame:
+    """Pair final adjacent visits and validate non-overlapping durations.
+
+    Parameters
+    ----------
+    current : pandas.DataFrame
+        Latest destination visits with their scheduled ``from_stop_id`` and
+        ``from_stop_sequence``. Arrival-delay validity is not used.
+    preceding : pandas.DataFrame
+        Latest upstream visits with arrival/departure times and optional
+        stop/trip relationship flags.
+    recording_start, recording_end : pandas.Timestamp
+        UTC bounds for destination arrival anchors and completed events.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Exact dated endpoint pairs with independent traversal/dwell seconds
+        and exclusion reasons. Inputs are not modified; missing values stay gaps.
+    """
+    upstream_columns = [
+        "trip_instance_key",
+        "stop_id",
+        "stop_sequence",
+        "arrival_time",
+        "departure_time",
+    ]
+    upstream_columns += [
+        c
+        for c in ("schedule_relationship", "trip_schedule_relationship")
+        if c in preceding
+    ]
+    upstream = preceding[upstream_columns].rename(
+        columns={
+            "stop_id": "from_stop_id",
+            "stop_sequence": "from_stop_sequence",
+            **{
+                c: f"upstream_{c}"
+                for c in upstream_columns
+                if c not in ("trip_instance_key", "stop_id", "stop_sequence")
+            },
+        }
+    )
+    observations = current.merge(
+        upstream,
+        on=["trip_instance_key", "from_stop_id", "from_stop_sequence"],
+        how="left",
+        validate="many_to_one",
+        indicator="upstream_match",
+    )
+    for column in (
+        "arrival_time",
+        "upstream_arrival_time",
+        "upstream_departure_time",
+    ):
+        observations[column] = pd.to_datetime(
+            observations[column], utc=True, errors="raise"
+        )
+    arrival = observations["arrival_time"]
+    upstream_arrival = observations["upstream_arrival_time"]
+    upstream_departure = observations["upstream_departure_time"]
+    traversal = (arrival - upstream_departure).dt.total_seconds()
+    dwell = (upstream_departure - upstream_arrival).dt.total_seconds()
+    common_checks = [
+        ("missing_destination_arrival", arrival.isna()),
+        ("before_recording_window", arrival.lt(recording_start)),
+        ("unfinished_arrival", arrival.gt(recording_end)),
+    ]
+    common_checks.extend(
+        [
+            ("missing_upstream_visit", observations["upstream_match"].eq("left_only")),
+            ("missing_upstream_departure", upstream_departure.isna()),
+        ]
+    )
+    traversal_checks = [
+        (
+            "invalid_upstream_chronology",
+            upstream_departure.lt(upstream_arrival),
+        ),
+        ("nonpositive_traversal", traversal.le(0)),
+    ]
+    for prefix in ("", "upstream_"):
+        stop_flag = f"{prefix}schedule_relationship"
+        if stop_flag in observations:
+            flags = pd.to_numeric(observations[stop_flag], errors="raise")
+            common_checks.extend(
+                [
+                    (f"{prefix}skipped_visit", flags.eq(1)),
+                    (f"{prefix}no_data_visit", flags.eq(2)),
+                ]
+            )
+        trip_flag = f"{prefix}trip_schedule_relationship"
+        if trip_flag in observations:
+            flags = pd.to_numeric(observations[trip_flag], errors="raise")
+            common_checks.append((f"{prefix}cancelled_trip", flags.isin([3, 7])))
+    dwell_checks = [
+        ("missing_upstream_arrival", upstream_arrival.isna()),
+        ("negative_dwell", dwell.lt(0)),
+        ("unfinished_dwell", upstream_departure.gt(recording_end)),
+    ]
+    for metric, values, checks in (
+        ("traversal", traversal, traversal_checks),
+        ("dwell", dwell, dwell_checks),
+    ):
+        reasons = pd.Series("included", index=observations.index, dtype="string")
+        for reason, mask in [*common_checks, *checks]:
+            reasons.loc[reasons.eq("included") & mask] = reason
+        observations[f"{metric}_exclusion_reason"] = reasons
+        observations[f"{metric}_seconds"] = values.where(reasons.eq("included"))
+    return observations.drop(columns="upstream_match")

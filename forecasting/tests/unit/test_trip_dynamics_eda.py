@@ -7,6 +7,8 @@ import pytest
 
 from forecasting import (
     make_trip_dynamics_figure,
+    prepare_segment_timing_eda,
+    prepare_stop_dynamics_eda,
     prepare_trip_dynamics_eda,
     select_trip_dynamics_examples,
 )
@@ -58,6 +60,8 @@ def inputs():
                     "stop_sequence": [10, 20, 40, 80],
                     "arrival_delay": delays,
                     "arrival_time": arrivals,
+                    "departure_time": arrivals
+                    + pd.to_timedelta(np.arange(4) * 5 + 20 * (index + 1), unit="s"),
                     "feed_timestamp": [
                         arrivals[0] - pd.Timedelta(seconds=10),
                         *[t + pd.Timedelta(seconds=10) for t in arrivals[1:]],
@@ -111,6 +115,18 @@ def test_full_journeys_signed_maxima_adjacent_changes_speed_and_input_preservati
     np.testing.assert_allclose(first.baseline_speed_kmh, [np.nan, 39.6, 39.6, 75.6])
     assert first.probe_count.tolist() == [0, 2, 1, 1]
     assert first.baseline_probe_count.tolist() == [0, 6, 3, 3]
+    np.testing.assert_allclose(first.traversal_seconds, [np.nan, 100, 95, 90])
+    np.testing.assert_allclose(first.baseline_traversal_seconds, [np.nan, 80, 75, 70])
+    assert first.baseline_traversal_count.tolist() == [0, 3, 3, 3]
+    assert first.iloc[0].traversal_exclusion_reason == "no_incoming_segment"
+    np.testing.assert_allclose(first.dwell_seconds, [np.nan, 20, 25, 30])
+    np.testing.assert_allclose(first.baseline_dwell_seconds, [np.nan, 40, 45, 50])
+    assert first.baseline_dwell_count.tolist() == [0, 3, 3, 3]
+    np.testing.assert_allclose(
+        first.traversal_seconds + first.dwell_seconds,
+        (first.arrival_time - first.upstream_arrival_time).dt.total_seconds(),
+        equal_nan=True,
+    )
     assert result.journeys.vehicle_count.eq(1).all()
     for frame, original in zip(inputs, originals):
         pdt.assert_frame_equal(frame, original)
@@ -125,6 +141,7 @@ def test_missing_intermediate_visit_is_visible_and_never_bridged(inputs):
     assert first.stop_sequence.tolist() == [10, 20, 40, 80]
     assert first.exclusion_reason.tolist()[2] == "missing_stop_visit"
     np.testing.assert_allclose(first.delta_delay_seconds, [np.nan, 60, np.nan, np.nan])
+    np.testing.assert_allclose(first.traversal_seconds, [np.nan, 100, np.nan, np.nan])
     journey = result.journeys.query("trip_start_timestamp == '2026-09-08 03:00'").iloc[
         0
     ]
@@ -185,6 +202,10 @@ def test_daily_instances_and_repeated_visits_remain_distinct(inputs):
     assert first.stop_id.tolist() == ["a", "b", "c", "b"]
     assert first.arrival_delay.tolist() == [60, 120, 420, 360]
     assert first.observed_speed_kmh.tolist()[1:] == [36, 36, 72]
+    np.testing.assert_allclose(first.traversal_seconds, [np.nan, 100, 95, 90])
+    np.testing.assert_allclose(
+        _journey(result, "2026-09-09 03:00").traversal_seconds, [np.nan, 80, 75, 70]
+    )
 
 
 def test_unmatched_missing_start_and_wrong_direction_updates_are_not_paired(inputs):
@@ -264,6 +285,9 @@ def test_ambiguous_vehicle_identity_never_pools_two_bus_speeds(inputs):
     with pytest.warns(UserWarning):
         result = prepare_trip_dynamics_eda(probes, updates, *static)
     assert _journey(result).observed_speed_kmh.isna().all()
+    np.testing.assert_allclose(
+        _journey(result).traversal_seconds, [np.nan, 100, 95, 90]
+    )
     assert result.journeys.iloc[0].vehicle_identity_status == "ambiguous"
     assert pd.isna(result.journeys.iloc[0].vehicle_id)
 
@@ -448,10 +472,177 @@ def test_figure_retains_missing_stop_gaps_and_selected_trip_only(inputs):
     np.testing.assert_allclose(figure.data[1].y, [np.nan, 1, np.nan, np.nan])
     assert figure.data[0].connectgaps is False
     assert "INCOMPLETE" in figure.layout.title.text
-    assert any("No unambiguous" in a.text for a in figure.layout.annotations)
-    assert list(figure.layout.xaxis3.tickvals) == [0, 1, 2, 3]
-    assert "Third" in figure.layout.xaxis3.ticktext[2]
+    np.testing.assert_allclose(figure.data[2].y, [np.nan, 100, np.nan, np.nan])
+    np.testing.assert_allclose(figure.data[3].y, [np.nan, 80, 65, 60])
+    assert figure.data[2].connectgaps is False
+    assert figure.layout.yaxis3.title.text == "Traversal time (s)"
+    assert [trace.yaxis for trace in figure.data] == ["y", "y2", "y3", "y3", "y4", "y4"]
+    assert all(
+        figure.layout[axis].matches == "x4" for axis in ("xaxis", "xaxis2", "xaxis3")
+    )
+    assert figure.layout.yaxis4.title.text == "Upstream dwell (s)"
+    np.testing.assert_allclose(figure.data[4].y, [np.nan, 20, np.nan, np.nan])
+    np.testing.assert_allclose(figure.data[5].y, [np.nan, 40, 55, 60])
+    assert figure.data[4].connectgaps is False
+    assert "Median upstream dwell:" in figure.data[5].hovertemplate
+    assert "Baseline traversals:" in figure.data[3].hovertemplate
+    assert list(figure.layout.xaxis4.tickvals) == [0, 1, 2, 3]
+    assert "Third" in figure.layout.xaxis4.ticktext[2]
     with pytest.raises(ValueError, match="No prepared"):
         make_trip_dynamics_figure(
             replace(result, journeys=result.journeys.iloc[:0]), key
         )
+
+
+@pytest.mark.parametrize(
+    "row,column,value,reason",
+    [
+        (0, "departure_time", pd.NaT, "missing_upstream_departure"),
+        (
+            0,
+            "departure_time",
+            pd.Timestamp("2026-09-08 10:02Z"),
+            "nonpositive_traversal",
+        ),
+        (
+            0,
+            "departure_time",
+            pd.Timestamp("2026-09-08 09:59Z"),
+            "invalid_upstream_chronology",
+        ),
+        (1, "arrival_time", pd.Timestamp("2030-01-01", tz="UTC"), "unfinished_arrival"),
+        (0, "schedule_relationship", 2, "upstream_no_data_visit"),
+        (1, "schedule_relationship", 1, "skipped_visit"),
+        (0, "trip_schedule_relationship", 7, "upstream_cancelled_trip"),
+    ],
+)
+def test_traversal_uses_latest_exact_endpoints_without_older_fallback(
+    inputs, row, column, value, reason
+):
+    probes, updates, *static = inputs
+    updates = updates.assign(schedule_relationship=0, trip_schedule_relationship=0)
+    newer = updates.iloc[[row]].assign(id=999)
+    newer.loc[:, column] = value
+    with pytest.warns(UserWarning):
+        result = prepare_trip_dynamics_eda(
+            probes, pd.concat([updates, newer], ignore_index=True), *static
+        )
+    visit = _journey(result).iloc[1]
+    assert visit.traversal_exclusion_reason == reason
+    assert pd.isna(visit.traversal_seconds)
+    assert visit.baseline_traversal_count == 2
+    assert visit.baseline_traversal_seconds == 70
+
+
+def test_traversal_baselines_include_unselected_and_delay_unusable_journeys(inputs):
+    probes, updates, *static = inputs
+    updates = updates.copy()
+    updates.loc[:3, "arrival_delay"] = np.nan
+    repeated = pd.concat([updates, updates.iloc[:4]], ignore_index=True)
+    with pytest.warns(UserWarning):
+        result = prepare_trip_dynamics_eda(probes, repeated, *static)
+    assert len(result.journeys) == 2
+    first = _journey(result)
+    assert first.arrival_delay.isna().all()
+    np.testing.assert_allclose(first.traversal_seconds, [np.nan, 100, 95, 90])
+    assert first.baseline_traversal_count.tolist() == [0, 3, 3, 3]
+    np.testing.assert_allclose(first.baseline_traversal_seconds, [np.nan, 80, 75, 70])
+    selected = select_trip_dynamics_examples(result.journeys, k=1)
+    figure = make_trip_dynamics_figure(result, selected.trip_instance_key.iloc[0])
+    np.testing.assert_allclose(figure.data[3].y, [np.nan, 80, 75, 70])
+
+
+def test_missing_departure_support_is_audited_without_removing_delay_journeys(inputs):
+    probes, updates, *static = inputs
+    with pytest.warns(UserWarning, match="incomplete"):
+        result = prepare_trip_dynamics_eda(
+            probes, updates.drop(columns="departure_time"), *static
+        )
+    assert result.journeys.max_delay_minutes.tolist() == [7, 3, -1]
+    assert result.visits.traversal_seconds.isna().all()
+    assert result.visits.baseline_traversal_count.eq(0).all()
+    assert result.visits.baseline_dwell_seconds.isna().all()
+    assert result.visits.baseline_dwell_count.eq(0).all()
+    audit = result.audit.query("stage == 'timing_inputs'").set_index("reason")["count"]
+    assert audit["missing_departure_time_column"] == len(updates)
+    figure = make_trip_dynamics_figure(
+        result, result.journeys.trip_instance_key.iloc[0]
+    )
+    assert any(
+        "No completed journey traversals" in a.text for a in figure.layout.annotations
+    )
+    assert any("No usable upstream dwell" in a.text for a in figure.layout.annotations)
+
+
+def test_journey_and_single_segment_traversal_measurements_agree(inputs):
+    journeys = prepare_trip_dynamics_eda(*inputs)
+    segment = prepare_segment_timing_eda(
+        prepare_stop_dynamics_eda(*inputs, segment_id=0)
+    )
+    expected = segment.observations.sort_values("trip_instance_key")
+    actual = journeys.visits.query("segment_id == 0").sort_values("trip_instance_key")
+    assert actual.trip_instance_key.tolist() == expected.trip_instance_key.tolist()
+    np.testing.assert_allclose(actual.traversal_seconds, expected.traversal_seconds)
+    assert actual.baseline_traversal_seconds.eq(
+        segment.bins.baseline_traversal_seconds.iloc[0]
+    ).all()
+    assert actual.baseline_traversal_count.eq(segment.bins.traversal_count.sum()).all()
+
+
+def test_upstream_dwell_median_weights_valid_visits_not_updates_or_selected_journeys(
+    inputs,
+):
+    probes, updates, *static = inputs
+    updates = updates.copy()
+    for row, seconds in zip((0, 4, 8), (0, 20, 100)):
+        updates.loc[row, "departure_time"] = updates.loc[
+            row, "arrival_time"
+        ] + pd.Timedelta(seconds=seconds)
+    updates.loc[:3, "arrival_delay"] = np.nan
+    repeated = pd.concat(
+        [updates, updates.iloc[:4], updates.iloc[:4]], ignore_index=True
+    )
+    with pytest.warns(UserWarning):
+        result = prepare_trip_dynamics_eda(probes.iloc[:0], repeated, *static)
+    segment = result.visits.query("segment_id == 0").sort_values("trip_instance_key")
+    assert segment.dwell_seconds.tolist() == [0, 20, 100]
+    assert segment.baseline_dwell_seconds.eq(20).all()
+    assert segment.baseline_dwell_count.eq(3).all()
+    assert len(result.journeys) == 2
+    selected = select_trip_dynamics_examples(result.journeys, k=1)
+    figure = make_trip_dynamics_figure(result, selected.trip_instance_key.iloc[0])
+    assert figure.data[4].y[1] == 100
+    assert figure.data[5].y[1] == 20
+    audit = result.audit.query("stage == 'upstream_dwells'").set_index("reason")[
+        "count"
+    ]
+    assert audit["included"] == 9
+    assert audit["no_incoming_segment"] == 3
+
+
+@pytest.mark.parametrize(
+    "column,value,reason",
+    [
+        ("arrival_time", pd.NaT, "missing_upstream_arrival"),
+        ("departure_time", pd.NaT, "missing_upstream_departure"),
+        ("departure_time", pd.Timestamp("2026-09-08 09:59Z"), "negative_dwell"),
+        ("departure_time", pd.Timestamp("2030-01-01", tz="UTC"), "unfinished_dwell"),
+        ("schedule_relationship", 2, "upstream_no_data_visit"),
+    ],
+)
+def test_invalid_latest_upstream_dwell_stays_a_gap_and_does_not_bias_median(
+    inputs, column, value, reason
+):
+    probes, updates, *static = inputs
+    updates = updates.assign(schedule_relationship=0)
+    newer = updates.iloc[[0]].assign(id=999)
+    newer.loc[:, column] = value
+    with pytest.warns(UserWarning):
+        result = prepare_trip_dynamics_eda(
+            probes, pd.concat([updates, newer], ignore_index=True), *static
+        )
+    visit = _journey(result).iloc[1]
+    assert visit.dwell_exclusion_reason == reason
+    assert pd.isna(visit.dwell_seconds)
+    assert visit.baseline_dwell_seconds == 50
+    assert visit.baseline_dwell_count == 2

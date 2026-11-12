@@ -3,7 +3,12 @@ import pandas as pd
 import pandas.testing as pdt
 import pytest
 
-from forecasting import prepare_stop_dynamics_eda, run_congestion_engine
+from forecasting import (
+    make_segment_timing_figure,
+    prepare_segment_timing_eda,
+    prepare_stop_dynamics_eda,
+    run_congestion_engine,
+)
 from forecasting.stop_dynamics_eda import _segment_catalogue
 
 
@@ -409,6 +414,7 @@ def test_repeated_stops_are_joined_by_each_actual_predecessor_sequence():
             "arrival_delay": [60, 120, 180, 150, 150],
             "arrival_time": arrivals,
             "feed_timestamp": arrivals + pd.Timedelta("15s"),
+            "departure_time": arrivals + pd.Timedelta("10s"),
         }
     )
     result = prepare_stop_dynamics_eda(
@@ -418,6 +424,10 @@ def test_repeated_stops_are_joined_by_each_actual_predecessor_sequence():
     assert result.delay_changes["from_stop_sequence"].tolist() == [10, 30]
     assert result.upstream_visits["stop_sequence"].tolist() == [10, 30]
     assert result.upstream_visits["arrival_delay"].tolist() == [60, 180]
+    timing = prepare_segment_timing_eda(result)
+    assert timing.observations.from_stop_sequence.tolist() == [10, 30]
+    assert timing.observations.traversal_seconds.tolist() == [110, 110]
+    assert timing.observations.dwell_seconds.tolist() == [10, 10]
 
 
 def test_gaps_remain_missing_with_zero_support_not_zero_measurements():
@@ -502,4 +512,279 @@ def test_missing_required_columns_and_duplicate_static_keys_are_explicit():
             pd.concat([times, times.iloc[[0]]]),
             trips,
             segment_id=0,
+        )
+
+
+def _timing_updates(**kwargs):
+    updates = _updates(shift=kwargs.pop("shift", "2min"), **kwargs)
+    updates["departure_time"] = updates.arrival_time + pd.Timedelta("60s")
+    updates.loc[0, "departure_time"] = updates.loc[0, "arrival_time"] + pd.Timedelta(
+        "30s"
+    )
+    return updates
+
+
+def test_timing_uses_upstream_dwell_and_shares_only_departure_boundary():
+    analysis = _run(_timing_updates())
+    original_current = analysis.stop_visits.copy(deep=True)
+    original_upstream = analysis.upstream_visits.copy(deep=True)
+    timing = prepare_segment_timing_eda(analysis)
+    visits = timing.observations
+    assert visits.traversal_seconds.tolist() == [90.0]
+    assert visits.dwell_seconds.tolist() == [30.0]
+    assert (visits.traversal_seconds + visits.dwell_seconds).tolist() == (
+        visits.arrival_time - visits.upstream_arrival_time
+    ).dt.total_seconds().tolist()
+    assert visits.upstream_arrival_time.le(visits.upstream_departure_time).all()
+    assert visits.upstream_departure_time.lt(visits.arrival_time).all()
+    assert timing.bins.index.equals(analysis.speed_bins.index)
+    pdt.assert_frame_equal(analysis.stop_visits, original_current)
+    pdt.assert_frame_equal(analysis.upstream_visits, original_upstream)
+
+
+@pytest.mark.parametrize(
+    "row,field,value,traversal_reason,dwell_reason",
+    [
+        (
+            0,
+            "departure_time",
+            pd.NaT,
+            "missing_upstream_departure",
+            "missing_upstream_departure",
+        ),
+        (0, "arrival_time", pd.NaT, "included", "missing_upstream_arrival"),
+        (
+            0,
+            "departure_time",
+            "2026-09-08 10:01Z",
+            "invalid_upstream_chronology",
+            "negative_dwell",
+        ),
+        (0, "departure_time", "2026-09-08 10:04Z", "nonpositive_traversal", "included"),
+        (
+            0,
+            "departure_time",
+            "2026-09-08 11:00Z",
+            "nonpositive_traversal",
+            "unfinished_dwell",
+        ),
+        (
+            1,
+            "arrival_time",
+            "2026-09-08 11:00Z",
+            "unfinished_arrival",
+            "unfinished_arrival",
+        ),
+        (
+            1,
+            "arrival_time",
+            pd.NaT,
+            "missing_destination_arrival",
+            "missing_destination_arrival",
+        ),
+        (
+            0,
+            "schedule_relationship",
+            2,
+            "upstream_no_data_visit",
+            "upstream_no_data_visit",
+        ),
+        (
+            0,
+            "trip_schedule_relationship",
+            3,
+            "upstream_cancelled_trip",
+            "upstream_cancelled_trip",
+        ),
+        (1, "schedule_relationship", 1, "skipped_visit", "skipped_visit"),
+        (1, "trip_schedule_relationship", 3, "cancelled_trip", "cancelled_trip"),
+    ],
+)
+def test_timing_validity_is_independent_and_never_uses_older_endpoint(
+    row, field, value, traversal_reason, dwell_reason
+):
+    updates = _timing_updates().assign(
+        schedule_relationship=0, trip_schedule_relationship=0
+    )
+    older = updates.copy()
+    older["feed_timestamp"] -= pd.Timedelta("1s")
+    if field.endswith("_time") and isinstance(value, str):
+        value = pd.Timestamp(value)
+    updates.loc[row, field] = value
+    with pytest.warns(UserWarning):
+        analysis = _run(pd.concat([older, updates], ignore_index=True))
+        timing = prepare_segment_timing_eda(analysis)
+    visit = timing.observations.iloc[0]
+    assert visit.traversal_exclusion_reason == traversal_reason
+    assert visit.dwell_exclusion_reason == dwell_reason
+    for metric, reason in (("traversal", traversal_reason), ("dwell", dwell_reason)):
+        assert pd.isna(visit[f"{metric}_seconds"]) == (reason != "included")
+        assert timing.bins[f"{metric}_count"].sum() == int(reason == "included")
+        assert timing.audit.query("metric == @metric")["count"].sum() == 1
+
+
+def test_missing_arrival_delays_do_not_remove_usable_timings():
+    with pytest.warns(UserWarning, match="excluded"):
+        analysis = _run(_timing_updates(delays=(np.nan, np.nan, np.nan)))
+    timing = prepare_segment_timing_eda(analysis)
+    assert analysis.delay_bins.pair_count.sum() == 0
+    assert timing.bins.traversal_count.sum() == timing.bins.dwell_count.sum() == 1
+    assert timing.observations.traversal_seconds.tolist() == [90]
+
+
+@pytest.mark.parametrize(
+    "departure",
+    [pd.NaT, pd.Timestamp("2026-09-08 10:03Z"), pd.Timestamp("2026-09-08 11:00Z")],
+)
+def test_destination_departure_does_not_affect_upstream_dwell_or_traversal(departure):
+    updates = _timing_updates()
+    updates.loc[1, "departure_time"] = departure
+    timing = prepare_segment_timing_eda(_run(updates))
+    assert timing.observations.traversal_seconds.tolist() == [90]
+    assert timing.observations.dwell_seconds.tolist() == [30]
+    assert timing.bins.baseline_dwell_seconds.eq(30).all()
+
+
+def test_missing_upstream_visit_excludes_both_durations():
+    with pytest.warns(UserWarning, match="excluded"):
+        analysis = _run(_timing_updates().iloc[[1, 2]])
+        timing = prepare_segment_timing_eda(analysis)
+    assert timing.observations.traversal_exclusion_reason.tolist() == [
+        "missing_upstream_visit"
+    ]
+    assert timing.observations.dwell_exclusion_reason.tolist() == [
+        "missing_upstream_visit"
+    ]
+    assert timing.observations.dwell_seconds.isna().all()
+
+
+def test_timing_recording_boundary_retains_upstream_evidence_but_not_early_destinations():
+    updates = _timing_updates()
+    updates.loc[0, "arrival_time"] = pd.Timestamp("2026-09-08 10:00Z")
+    updates.loc[0, "departure_time"] = pd.Timestamp("2026-09-08 10:00:30Z")
+    with pytest.warns(UserWarning, match="excluded"):
+        analysis = _run(updates)
+    assert analysis.upstream_visits.exclusion_reason.tolist() == [
+        "before_recording_window"
+    ]
+    timing = prepare_segment_timing_eda(analysis)
+    assert timing.observations.traversal_seconds.tolist() == [210]
+    assert timing.observations.dwell_seconds.tolist() == [30]
+
+    updates.loc[0, "arrival_time"] = pd.Timestamp("2026-09-08 09:58Z")
+    updates.loc[0, "departure_time"] = pd.Timestamp("2026-09-08 09:58:30Z")
+    updates.loc[1, "arrival_time"] = pd.Timestamp("2026-09-08 10:00Z")
+    updates.loc[1, "departure_time"] = pd.Timestamp("2026-09-08 10:00:30Z")
+    with pytest.warns(UserWarning, match="excluded"):
+        timing = prepare_segment_timing_eda(_run(updates))
+    assert timing.observations.traversal_exclusion_reason.tolist() == [
+        "before_recording_window"
+    ]
+    assert timing.observations.dwell_exclusion_reason.tolist() == [
+        "before_recording_window"
+    ]
+
+
+def test_timing_medians_weight_individual_visits_keep_zero_dwell_and_leave_gaps():
+    frames = []
+    for i, (traversal, dwell, shift) in enumerate(
+        [(60, 0, "2min"), (120, 20, "2min"), (600, 80, "22min")]
+    ):
+        updates = _timing_updates(shift=shift, start=f"journey-{i}")
+        arrival = updates.loc[1, "arrival_time"]
+        updates.loc[0, "departure_time"] = arrival - pd.Timedelta(seconds=traversal)
+        updates.loc[0, "arrival_time"] = updates.loc[
+            0, "departure_time"
+        ] - pd.Timedelta(seconds=dwell)
+        frames.append(updates)
+    analysis = _run(pd.concat(frames, ignore_index=True))
+    timing = prepare_segment_timing_eda(analysis)
+    assert timing.observations.traversal_seconds.tolist() == [60, 120, 600]
+    assert timing.observations.dwell_seconds.tolist() == [0, 20, 80]
+    assert timing.bins.baseline_traversal_seconds.eq(120).all()
+    assert timing.bins.baseline_dwell_seconds.eq(20).all()
+    assert timing.bins.median_traversal_seconds.dropna().tolist() == [90, 600]
+    gap = timing.bins.loc[pd.Timestamp("2026-09-08 10:15Z")]
+    assert gap.traversal_count == gap.dwell_count == 0
+    assert pd.isna(gap.median_traversal_seconds)
+    assert pd.isna(gap.median_dwell_seconds)
+
+
+def test_dated_timing_instances_do_not_pair_across_days():
+    first = _timing_updates()
+    second = _timing_updates(shift="1D2min", start="2026-09-09 03:00")
+    first.loc[0, "departure_time"] = pd.NaT
+    with pytest.warns(UserWarning, match="excluded"):
+        timing = prepare_segment_timing_eda(_run(pd.concat([first, second])))
+    assert timing.observations.trip_instance_key.nunique() == 2
+    assert pd.isna(timing.observations.traversal_seconds.iloc[0])
+    assert timing.observations.traversal_seconds.iloc[1] == 90
+    assert pd.isna(timing.observations.dwell_seconds.iloc[0])
+    assert timing.observations.dwell_seconds.iloc[1] == 30
+
+
+def test_timing_requires_departure_support_without_breaking_delay_only_preparation():
+    analysis = _run()
+    with pytest.raises(ValueError, match="departure_time"):
+        prepare_segment_timing_eda(analysis)
+    with pytest.warns(UserWarning):
+        empty = _run(_timing_updates().assign(trip_id="obsolete"))
+        timing = prepare_segment_timing_eda(empty)
+    assert timing.observations.empty
+    assert timing.bins.traversal_count.eq(0).all()
+    assert timing.bins.baseline_dwell_seconds.isna().all()
+    figure = make_segment_timing_figure(empty, timing)
+    messages = [annotation.text for annotation in figure.layout.annotations]
+    assert "No usable traversal observations: inspect timing audit" in messages
+    assert "No usable upstream dwell observations: inspect timing audit" in messages
+    assert "No usable arrival-delay pairs: inspect delay audit" in messages
+
+
+def test_timing_figure_row_order_shared_axes_units_and_zoom_invariant_baselines():
+    analysis = _run(_timing_updates())
+    timing = prepare_segment_timing_eda(analysis)
+    figure = make_segment_timing_figure(
+        analysis,
+        timing,
+        display_start="2026-09-08 10:02Z",
+        display_end="2026-09-08 10:05Z",
+    )
+    assert [trace.yaxis for trace in figure.data] == [
+        "y",
+        "y",
+        "y2",
+        "y2",
+        "y3",
+        "y3",
+        "y3",
+        "y4",
+        "y4",
+        "y4",
+    ]
+    assert [figure.layout[f"yaxis{i or ''}"].title.text for i in ("", 2, 3, 4)] == [
+        "Delay change (min)",
+        "Speed (km/h)",
+        "Traversal (s)",
+        "Upstream dwell (s)",
+    ]
+    for axis in ("xaxis", "xaxis2", "xaxis3"):
+        assert figure.layout[axis].matches == "x4"
+    assert figure.layout.xaxis4.rangeslider.visible
+    assert all(
+        not figure.layout[axis].fixedrange
+        for axis in ("yaxis", "yaxis2", "yaxis3", "yaxis4")
+    )
+    np.testing.assert_array_equal(
+        figure.data[6].y, timing.bins.baseline_traversal_seconds
+    )
+    np.testing.assert_array_equal(figure.data[9].y, timing.bins.baseline_dwell_seconds)
+    assert list(figure.data[4].x) == (
+        timing.observations.arrival_time.dt.tz_convert("America/Vancouver").tolist()
+    )
+    assert list(figure.data[7].y) == [30]
+    assert "Upstream arrival:" in figure.data[7].hovertemplate
+    assert "Destination departure:" not in figure.data[7].hovertemplate
+    with pytest.raises(ValueError, match="start before end"):
+        make_segment_timing_figure(
+            analysis, timing, display_start="2026-09-09", display_end="2026-09-08"
         )

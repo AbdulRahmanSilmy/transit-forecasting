@@ -1,4 +1,4 @@
-"""Prepare full-journey delay evolution and independent speed-probe context."""
+"""Prepare full-journey delay evolution, traversal and upstream dwell."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from .road_segment_congestion import _normalize_direction_ids, _require_columns
-from .stop_dynamics_eda import _segment_catalogue
+from .stop_dynamics_eda import _segment_catalogue, _segment_timing_observations
 from .trip_updates import get_latest_stop_delays
 
 _VISIT_KEYS = ["trip_id", "trip_direction_id", "stop_id", "stop_sequence"]
@@ -30,7 +30,13 @@ class TripDynamicsEDA:
         All scheduled stops for matched dated journeys, in travel order.
         Unusable ``arrival_delay`` and ``delta_delay_seconds`` remain missing.
         Speeds are in km/h; arrival timestamps are UTC. Reported endpoint
-        values and exclusion reasons are retained for audit.
+        values and exclusion reasons are retained for audit. ``traversal_seconds``
+        is destination arrival minus upstream departure, excluding upstream
+        dwell. ``baseline_traversal_seconds`` and ``baseline_traversal_count``
+        describe all usable visits for that directed, shape-specific segment.
+        ``dwell_seconds`` is upstream departure minus upstream arrival;
+        ``baseline_dwell_seconds`` and ``baseline_dwell_count`` describe
+        its full-snapshot median and independent support per segment.
     audit : pandas.DataFrame
         Counts by preparation stage and reason.
     """
@@ -66,6 +72,8 @@ def prepare_trip_dynamics_eda(
     trip_updates : pandas.DataFrame
         Stop predictions with route, direction, trip/start, stop/sequence,
         publication time, arrival time, and arrival delay in seconds.
+        Optional ``departure_time`` enables traversal and upstream dwell.
+        Missing departure support is audited and leaves timing gaps.
     stops, stop_times, trips : pandas.DataFrame
         Matching static GTFS tables. Geometry is not required.
     route_id : str, optional
@@ -81,6 +89,13 @@ def prepare_trip_dynamics_eda(
         full-snapshot median individual probe speed for that directed shape.
         Baselines not exceeding 0.5 m/s remain unavailable, as in the engine.
         Missing speed evidence does not remove a delay-selected journey.
+        Traversal durations and full-snapshot per-segment medians use final
+        endpoint timestamps independently of delay or vehicle-probe availability.
+        Missing, skipped, unfinished or nonpositive traversals remain gaps;
+        there is no speed or schedule fallback.
+        Upstream dwell excludes traversal time and retains reported zeros.
+        Its per-segment baseline is the median of usable individual dwell
+        observations over the full snapshot, not only selected journeys.
 
     Raises
     ------
@@ -159,7 +174,12 @@ def prepare_trip_dynamics_eda(
         _require_columns(source, tuple(required), stage)
         optional = [
             c
-            for c in ("id", "schedule_relationship", "trip_schedule_relationship")
+            for c in (
+                "id",
+                "schedule_relationship",
+                "trip_schedule_relationship",
+                "departure_time",
+            )
             if c in source and stage == "updates"
         ]
         frame = source.loc[
@@ -230,6 +250,15 @@ def prepare_trip_dynamics_eda(
     latest["arrival_time"] = pd.to_datetime(
         latest["arrival_time"], utc=True, errors="raise"
     )
+    if "departure_time" not in latest:
+        audit_rows.append(
+            {
+                "stage": "timing_inputs",
+                "reason": "missing_departure_time_column",
+                "count": len(latest),
+            }
+        )
+        latest["departure_time"] = pd.NaT
     latest["pair_exclusion_reason"] = "included"
     for mask, reason in (
         (latest["arrival_time"].isna(), "missing_arrival_time"),
@@ -256,8 +285,14 @@ def prepare_trip_dynamics_eda(
                     "stop_sequence",
                     "reported_arrival_delay",
                     "arrival_time",
+                    "departure_time",
                     "feed_timestamp",
                     "pair_exclusion_reason",
+                    *[
+                        c
+                        for c in ("schedule_relationship", "trip_schedule_relationship")
+                        if c in latest
+                    ],
                 ]
             ],
             on=["trip_instance_key", "stop_id", "stop_sequence"],
@@ -309,6 +344,33 @@ def prepare_trip_dynamics_eda(
     visits["delta_delay_seconds"] = (
         visits["reported_arrival_delay"] - previous["reported_arrival_delay"]
     ).where(visits["delta_exclusion_reason"].eq("included"))
+
+    visits["from_stop_id"] = previous["stop_id"]
+    visits["from_stop_sequence"] = previous["stop_sequence"]
+    visits = _segment_timing_observations(
+        visits,
+        visits,
+        recording_start=recording_start,
+        recording_end=recording_end,
+    )
+    for metric in ("traversal", "dwell"):
+        visits.loc[visits["position"].eq(0), f"{metric}_exclusion_reason"] = (
+            "no_incoming_segment"
+        )
+    timing_baselines = visits.groupby("segment_id").agg(
+        baseline_traversal_seconds=("traversal_seconds", "median"),
+        baseline_traversal_count=("traversal_seconds", "count"),
+        baseline_dwell_seconds=("dwell_seconds", "median"),
+        baseline_dwell_count=("dwell_seconds", "count"),
+    )
+    visits = visits.merge(
+        timing_baselines,
+        on="segment_id",
+        how="left",
+        validate="many_to_one",
+    )
+    for column in ("baseline_traversal_count", "baseline_dwell_count"):
+        visits[column] = visits[column].fillna(0).astype("int64")
 
     baselines = probes.groupby("segment_id").agg(
         baseline_speed=("position_speed", "median"),
@@ -423,6 +485,8 @@ def prepare_trip_dynamics_eda(
     for stage, column in (
         ("visits", "exclusion_reason"),
         ("delay_changes", "delta_exclusion_reason"),
+        ("traversals", "traversal_exclusion_reason"),
+        ("upstream_dwells", "dwell_exclusion_reason"),
     ):
         audit_rows.extend(
             {"stage": stage, "reason": reason, "count": int(count)}
@@ -441,7 +505,7 @@ def prepare_trip_dynamics_eda(
         warnings.warn(
             "Journey evidence is incomplete or excluded; inspect audit, stop coverage, "
             "and vehicle identity. Observed maxima may understate full-journey maxima; "
-            "missing speed evidence is not uncongested traffic.",
+            "missing traversal, dwell or speed evidence is not uncongested traffic.",
             UserWarning,
             stacklevel=2,
         )

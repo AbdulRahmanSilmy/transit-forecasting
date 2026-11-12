@@ -1,4 +1,4 @@
-"""Aligned full-journey delay and speed-probe plots."""
+"""Aligned full-journey delay, traversal-time and upstream-dwell plots."""
 
 from __future__ import annotations
 
@@ -32,8 +32,9 @@ def make_trip_dynamics_figure(
     Returns
     -------
     plotly.graph_objects.Figure
-        Three shared-stop panels: signed arrival delay, adjacent delay change,
-        and mean journey probe speed versus segment median probe baseline.
+        Four shared-stop panels: signed arrival delay, adjacent delay change,
+        journey traversal time versus the full-snapshot segment median, and
+        upstream dwell versus its full-snapshot median per segment.
         Missing scheduled observations remain gaps; no plot is shown or saved.
 
     Raises
@@ -56,6 +57,12 @@ def make_trip_dynamics_figure(
         .dt.strftime("%Y-%m-%d %H:%M:%S %Z"),
         upstream_minutes=visits["upstream_arrival_delay"] / 60,
         reported_minutes=visits["reported_arrival_delay"] / 60,
+        upstream_departure_local=visits["upstream_departure_time"]
+        .dt.tz_convert(display_timezone)
+        .dt.strftime("%Y-%m-%d %H:%M:%S %Z"),
+        upstream_arrival_local=visits["upstream_arrival_time"]
+        .dt.tz_convert(display_timezone)
+        .dt.strftime("%Y-%m-%d %H:%M:%S %Z"),
     )
     x = visits["position"].tolist()
     common = ["stop_name", "stop_id", "stop_sequence", "arrival_local"]
@@ -64,14 +71,15 @@ def make_trip_dynamics_figure(
         "<br>Reported arrival: %{customdata[3]}<br>"
     )
     figure = make_subplots(
-        rows=3,
+        rows=4,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.075,
+        vertical_spacing=0.055,
         subplot_titles=(
             "Arrival delay: persistence, accumulation, and recovery",
             "Delay gained / recovered on each incoming segment",
-            "This journey's mean probe speed vs segment median probe speed",
+            "This journey's traversal time vs segment median traversal time",
+            "Upstream-stop dwell vs segment median upstream dwell",
         ),
     )
     figure.add_trace(
@@ -117,18 +125,22 @@ def make_trip_dynamics_figure(
     figure.add_trace(
         go.Scatter(
             x=x,
-            y=visits["observed_speed_kmh"],
+            y=visits["traversal_seconds"],
             mode="lines+markers",
-            name="Journey mean probe speed",
+            name="Journey traversal time",
             connectgaps=False,
             line=dict(color="darkviolet"),
             customdata=hover[
-                [*common, "probe_count", "first_probe_time", "last_probe_time"]
+                [
+                    *common,
+                    "upstream_departure_local",
+                    "traversal_exclusion_reason",
+                ]
             ],
             hovertemplate=endpoint_hover
             + (
-                "Speed: %{y:.2f} km/h<br>Probes: %{customdata[4]}"
-                "<br>First / last probe (UTC): %{customdata[5]} / %{customdata[6]}<extra></extra>"
+                "Traversal: %{y:.1f} s<br>Upstream departure: %{customdata[4]}"
+                "<br>Status: %{customdata[5]}<extra></extra>"
             ),
         ),
         row=3,
@@ -137,26 +149,74 @@ def make_trip_dynamics_figure(
     figure.add_trace(
         go.Scatter(
             x=x,
-            y=visits["baseline_speed_kmh"],
+            y=visits["baseline_traversal_seconds"],
             mode="lines+markers",
-            name="Full-snapshot median probe speed",
+            name="Full-snapshot median traversal time",
             connectgaps=False,
             line=dict(color="darkorange", dash="dash"),
-            customdata=hover[[*common, "segment_id", "baseline_probe_count"]],
+            customdata=hover[[*common, "segment_id", "baseline_traversal_count"]],
             hovertemplate=endpoint_hover
             + (
-                "Segment: %{customdata[4]}<br>Median speed: %{y:.2f} km/h"
-                "<br>Baseline probes: %{customdata[5]}<extra></extra>"
+                "Segment: %{customdata[4]}<br>Median traversal: %{y:.1f} s"
+                "<br>Baseline traversals: %{customdata[5]}<extra></extra>"
             ),
         ),
         row=3,
+        col=1,
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=x,
+            y=visits["dwell_seconds"],
+            mode="lines+markers",
+            name="Journey upstream dwell",
+            connectgaps=False,
+            line=dict(color="teal"),
+            customdata=hover[
+                [
+                    *common,
+                    "upstream_stop_id",
+                    "from_stop_sequence",
+                    "upstream_arrival_local",
+                    "upstream_departure_local",
+                    "dwell_exclusion_reason",
+                ]
+            ],
+            hovertemplate=endpoint_hover
+            + (
+                "Upstream stop: %{customdata[4]} (sequence %{customdata[5]})"
+                "<br>Upstream arrival: %{customdata[6]}"
+                "<br>Upstream departure: %{customdata[7]}"
+                "<br>Dwell: %{y:.1f} s<br>Status: %{customdata[8]}<extra></extra>"
+            ),
+        ),
+        row=4,
+        col=1,
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=x,
+            y=visits["baseline_dwell_seconds"],
+            mode="lines+markers",
+            name="Full-snapshot median upstream dwell",
+            connectgaps=False,
+            line=dict(color="darkorange", dash="dash"),
+            customdata=hover[[*common, "segment_id", "baseline_dwell_count"]],
+            hovertemplate=endpoint_hover
+            + (
+                "Segment: %{customdata[4]}<br>Median upstream dwell: %{y:.1f} s"
+                "<br>Baseline dwell visits: %{customdata[5]}<extra></extra>"
+            ),
+        ),
+        row=4,
         col=1,
     )
     for row in (1, 2):
         figure.add_hline(y=0, line_dash="dot", line_color="gray", row=row, col=1)
     for row, column, message in (
         (2, "delta_delay_seconds", "No usable adjacent delay pairs"),
-        (3, "observed_speed_kmh", "No unambiguous journey speed probes"),
+        (3, "traversal_seconds", "No completed journey traversals: inspect audit"),
+        (4, "dwell_seconds", "No usable upstream dwell: inspect audit"),
     ):
         if visits[column].notna().sum() == 0:
             figure.add_annotation(
@@ -170,7 +230,10 @@ def make_trip_dynamics_figure(
     figure.update_yaxes(title_text="Arrival delay (min)", row=1, col=1)
     figure.update_yaxes(title_text="Delay change (min)", row=2, col=1)
     figure.update_yaxes(
-        title_text="Probe speed (km/h)", rangemode="tozero", row=3, col=1
+        title_text="Traversal time (s)", rangemode="tozero", row=3, col=1
+    )
+    figure.update_yaxes(
+        title_text="Upstream dwell (s)", rangemode="tozero", row=4, col=1
     )
     figure.update_yaxes(fixedrange=False)
     labels = []
@@ -188,7 +251,7 @@ def make_trip_dynamics_figure(
         title_text="Scheduled stops in travel order",
         tickangle=-45,
         automargin=True,
-        row=3,
+        row=4,
         col=1,
     )
     coverage = (
@@ -210,10 +273,10 @@ def make_trip_dynamics_figure(
             f" | direction {journey['trip_direction_id']}<br>"
             f"Maximum delay: {journey['max_delay_minutes']:.3f} min | {vehicle}<br>{coverage}"
         ),
-        height=1100,
+        height=1400,
         hovermode="x unified",
         hoversubplots="axis",
-        legend=dict(orientation="h", x=0, y=-0.52, yanchor="top"),
-        margin=dict(t=170, b=340, l=115, r=40),
+        legend=dict(orientation="h", x=0, y=-0.30, yanchor="top"),
+        margin=dict(t=170, b=360, l=115, r=40),
     )
     return figure

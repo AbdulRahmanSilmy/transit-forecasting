@@ -55,7 +55,13 @@ from .stop_congestion_display import (
     make_stop_congestion_cohort_figures,
     make_stop_congestion_example,
 )
-from .stop_dynamics_eda import StopDynamicsEDA, prepare_stop_dynamics_eda
+from .stop_dynamics_display import make_segment_timing_figure
+from .stop_dynamics_eda import (
+    SegmentTimingEDA,
+    StopDynamicsEDA,
+    prepare_segment_timing_eda,
+    prepare_stop_dynamics_eda,
+)
 from .trip_dynamics_display import make_trip_dynamics_figure
 from .trip_dynamics_eda import (
     TripDynamicsEDA,
@@ -74,6 +80,7 @@ __all__ = [
     "DelayCongestionResult",
     "DelayModelConfig",
     "SegmentDelayData",
+    "SegmentTimingEDA",
     "StopCongestionAnalysis",
     "StopDynamicsEDA",
     "TripDynamicsEDA",
@@ -96,6 +103,7 @@ __all__ = [
     "make_propagation_heatmap",
     "make_stop_congestion_cohort_figures",
     "make_stop_congestion_example",
+    "make_segment_timing_figure",
     "make_time_space_diagram",
     "make_trip_dynamics_figure",
     "make_segment_delay_splits",
@@ -104,6 +112,7 @@ __all__ = [
     "prepare_delay_congestion_snapshots",
     "prepare_stop_congestion_analysis",
     "prepare_stop_dynamics_eda",
+    "prepare_segment_timing_eda",
     "prepare_trip_dynamics_eda",
     "prepare_segment_delay_data",
     "run_congestion_engine",
