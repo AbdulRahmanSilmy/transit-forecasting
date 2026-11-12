@@ -5,6 +5,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 from shapely.geometry import LineString, MultiLineString, Point
 from shapely.ops import substring
@@ -369,6 +370,95 @@ def _build_route_segments(
     lookup = pd.DataFrame(lookup_rows)
     lookup["segment_id"] = lookup["segment_id"].astype("Int64")
     return representative_trip_id, route_geometry, pd.DataFrame(segment_rows), lookup
+
+
+def _shape_path_distance_meters(geometry: LineString) -> float:
+    """Sum spherical great-circle distances along a shape path.
+
+    Parameters
+    ----------
+    geometry : shapely.geometry.LineString
+        Path vertices in longitude/latitude degrees.
+
+    Returns
+    -------
+    float
+        Path length in metres, using the mean Earth radius.
+
+    Raises
+    ------
+    ValueError
+        If the path length is nonpositive or nonfinite.
+    """
+    coordinates = np.radians(np.asarray(geometry.coords))
+    longitude, latitude = coordinates[:, 0], coordinates[:, 1]
+    haversine = (
+        np.sin(np.diff(latitude) / 2) ** 2
+        + np.cos(latitude[:-1])
+        * np.cos(latitude[1:])
+        * np.sin(np.diff(longitude) / 2) ** 2
+    )
+    distance = float(
+        (2 * 6_371_008.8 * np.arcsin(np.sqrt(np.clip(haversine, 0, 1)))).sum()
+    )
+    if not np.isfinite(distance) or distance <= 0:
+        raise ValueError("Selected segment must have positive finite path length.")
+    return distance
+
+
+def build_route_segments(
+    df_stops: pd.DataFrame,
+    df_stop_times: pd.DataFrame,
+    df_trips: pd.DataFrame,
+    df_shapes: pd.DataFrame,
+    *,
+    route_id: str = "97-KEL",
+    trip_direction_id: int | None = None,
+) -> pd.DataFrame:
+    """Build static directed segment geometry and distances without realtime data.
+
+    Use the congestion engine's segment numbering for the same static snapshot,
+    route, and direction selection. Shared stop pairs on the same shape reuse
+    a segment; different shapes and directions remain separate. Inputs are not
+    modified, and no observations or congestion estimates are computed.
+
+    Parameters
+    ----------
+    df_stops, df_stop_times, df_trips, df_shapes : pandas.DataFrame
+        GTFS stops, stop times, trips, and shapes tables, respectively.
+    route_id : str, optional
+        GTFS route identifier.
+    trip_direction_id : int or None, optional
+        Direction 0 or 1, or both directions when None.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Engine-compatible segment IDs, direction and shape IDs, endpoint stop
+        IDs and names, downstream stop sequence, longitude/latitude
+        ``geometry``, and ``distance_meters``. Distances sum spherical
+        great-circle lengths along the sliced GTFS shape, not straight lines
+        between stops or Shapely lengths in degrees.
+
+    Raises
+    ------
+    ValueError
+        If route/direction selection or selected GTFS metadata is invalid,
+        or a segment has nonpositive or nonfinite path length.
+    """
+    if not isinstance(route_id, str) or not route_id:
+        raise ValueError("route_id must be a non-empty string.")
+    if trip_direction_id is not None and (
+        isinstance(trip_direction_id, bool)
+        or not isinstance(trip_direction_id, int)
+        or trip_direction_id not in (0, 1)
+    ):
+        raise ValueError("trip_direction_id must be 0, 1, or None.")
+    _, _, segments, _ = _build_route_segments(
+        df_stops, df_stop_times, df_trips, df_shapes, route_id, trip_direction_id
+    )
+    segments["distance_meters"] = segments["geometry"].map(_shape_path_distance_meters)
+    return segments
 
 
 def run_congestion_engine(

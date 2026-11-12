@@ -2,7 +2,7 @@ import pandas as pd
 import pandas.testing as pdt
 import pytest
 
-from forecasting import run_congestion_engine
+from forecasting import build_route_segments, run_congestion_engine
 
 
 def _static_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -261,6 +261,69 @@ def _two_way_updates() -> pd.DataFrame:
             "vehicle_id": ["outbound", "outbound", "return", "return"],
         }
     )
+
+
+@pytest.mark.parametrize("direction", [None, 0, 1])
+def test_static_segments_keep_engine_identity_and_inputs(direction) -> None:
+    frames = _two_way_data()
+    originals = [frame.copy(deep=True) for frame in frames]
+    segments = build_route_segments(*frames, trip_direction_id=direction)
+    engine = run_congestion_engine(
+        _two_way_updates(), *frames, trip_direction_id=direction
+    )
+
+    pdt.assert_frame_equal(segments.drop(columns="distance_meters"), engine.segments)
+    assert segments["distance_meters"].tolist() == pytest.approx(
+        [111_195.0802] * len(segments)
+    )
+    for frame, original in zip(frames, originals):
+        pdt.assert_frame_equal(frame, original)
+
+
+def test_static_segment_distance_follows_bent_shape() -> None:
+    stops, stop_times, trips, _ = _static_data()
+    shapes = pd.DataFrame(
+        {
+            "shape_id": ["shape-main"] * 4,
+            "shape_pt_sequence": [1, 2, 3, 4],
+            "shape_pt_lat": [0.0, 1.0, 0.0, 0.0],
+            "shape_pt_lon": [0.0, 0.0, 1.0, 2.0],
+        }
+    )
+    segments = build_route_segments(stops, stop_times, trips, shapes)
+
+    assert segments.loc[0, "distance_meters"] == pytest.approx(268_444.6785)
+    assert segments.loc[1, "distance_meters"] == pytest.approx(111_195.0802)
+    assert list(segments.loc[0, "geometry"].coords) == [
+        (0.0, 0.0),
+        (0.0, 1.0),
+        (1.0, 0.0),
+    ]
+
+
+@pytest.mark.parametrize("problem", ["missing-shape", "unknown-route", "bad-direction"])
+def test_static_segments_reject_invalid_selection_or_geometry(problem) -> None:
+    stops, stop_times, trips, shapes = _static_data()
+    route_id, direction = "97-KEL", 0
+    if problem == "missing-shape":
+        shapes = shapes.iloc[0:0]
+        message = "No shape points"
+    elif problem == "unknown-route":
+        route_id = "unknown"
+        message = "No GTFS trips"
+    else:
+        direction = 2
+        message = "trip_direction_id must be"
+
+    with pytest.raises(ValueError, match=message):
+        build_route_segments(
+            stops,
+            stop_times,
+            trips,
+            shapes,
+            route_id=route_id,
+            trip_direction_id=direction,
+        )
 
 
 def test_separates_two_way_geometry_probes_baselines_and_congestion() -> None:

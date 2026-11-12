@@ -11,6 +11,7 @@ from .road_segment_congestion import (
     CongestionResult,
     _normalize_direction_ids,
     _require_columns,
+    _shape_path_distance_meters,
 )
 from .trip_updates import get_latest_stop_delays
 
@@ -112,19 +113,7 @@ def get_segment_traversal_speeds(
         "vehicle_probes",
     )
 
-    coordinates = np.radians(np.asarray(segment["geometry"].coords))
-    longitude, latitude = coordinates[:, 0], coordinates[:, 1]
-    haversine = (
-        np.sin(np.diff(latitude) / 2) ** 2
-        + np.cos(latitude[:-1])
-        * np.cos(latitude[1:])
-        * np.sin(np.diff(longitude) / 2) ** 2
-    )
-    distance_meters = float(
-        (2 * 6_371_008.8 * np.arcsin(np.sqrt(np.clip(haversine, 0, 1)))).sum()
-    )
-    if not np.isfinite(distance_meters) or distance_meters <= 0:
-        raise ValueError("Selected segment must have positive finite path length.")
+    distance_meters = _shape_path_distance_meters(segment["geometry"])
 
     trips = df_trips.loc[
         df_trips["route_id"].astype("string").eq(result.route_id)
