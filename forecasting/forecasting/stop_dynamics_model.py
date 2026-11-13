@@ -9,8 +9,9 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 
-from .road_segment_congestion import _require_columns
+from .road_segment_congestion import _normalize_direction_ids, _require_columns
 from .stop_dynamics_eda import SegmentTimingEDA, StopDynamicsEDA
+from .trip_updates import get_latest_stop_delays
 
 _PAIR_KEYS = [
     "trip_instance_key",
@@ -59,6 +60,284 @@ class StopDynamicsModel:
     audit: pd.DataFrame
     holdout_start: pd.Timestamp
     baseline_timezone: str
+
+
+@dataclass(frozen=True)
+class StopDynamicsIdentity:
+    """Retrospective accounting identity for a directed stop pair.
+
+    Attributes
+    ----------
+    segment : pandas.Series
+        Reference catalogue metadata. ``shape_id`` is unavailable for the
+        historical pair; ``reference_shape_id`` identifies only the current
+        catalogue shape, not the shape of every historical journey.
+    observations : pandas.DataFrame
+        Eligible dated endpoint pairs, durations, feed-implied scheduled
+        arrivals and allowances, ``identity_delay_seconds``, signed
+        ``delta_delay_seconds`` and identity residuals. All eligible visits
+        are retained without fitting, temporal splits or competing approaches.
+        The identity uses each visit's downstream outcome.
+    audit : pandas.DataFrame
+        Publication-identity and pair-eligibility counts with explicit reasons.
+    """
+
+    segment: pd.Series
+    observations: pd.DataFrame
+    audit: pd.DataFrame
+
+
+def evaluate_stop_dynamics_identity(
+    trip_updates: pd.DataFrame,
+    segment: pd.Series,
+    *,
+    route_id: str = "97-KEL",
+    display_timezone: str = "America/Vancouver",
+) -> StopDynamicsIdentity:
+    """Infer each visit's allowance and evaluate the exact delay identity.
+
+    Pair latest reports for the selected directed stop IDs and the same dated
+    journey, requiring consecutive numeric stop sequences. This deliberately
+    conservative rule never bridges an unobserved sequence; nonconsecutive
+    GTFS numbering is not guessed. No current-GTFS trip or shape match is
+    required, so historical IDs absent from that snapshot remain eligible.
+
+    Infer scheduled arrivals as ``arrival_time - arrival_delay`` at both
+    endpoints. Then evaluate ``D_current = D_upstream + traversal + dwell
+    - inferred_allowance``. Agreement is tautological, not independent
+    validation: the allowance consumes the current visit's downstream outcome.
+    No slopes, intercept or hourly baselines are fitted. Use all eligible
+    observations, without holdouts or competing approaches.
+
+    Parameters
+    ----------
+    trip_updates : pandas.DataFrame
+        Trusted cached realtime reports, including arrival/departure timestamps,
+        arrival delay, direction, stop sequence and reliable start descriptors.
+    segment : pandas.Series
+        Reference segment metadata with direction and distinct endpoint IDs.
+    route_id : str, default "97-KEL"
+        Selected route.
+    display_timezone : str, default "America/Vancouver"
+        Timezone for observation-day coverage summaries.
+
+    Returns
+    -------
+    StopDynamicsIdentity
+        New frames with full-cache stop-pair eligibility, inferred allowances,
+        identity values and eligibility audit. Inputs are not modified.
+
+    Raises
+    ------
+    ValueError
+        For missing fields, invalid values, conflicting sequence identities,
+        or no eligible pairs.
+
+    Warns
+    -----
+    UserWarning
+        When endpoint publications or visit pairs are excluded. Missing latest
+        measurements are never replaced by earlier estimates or schedules.
+    """
+    _require_columns(
+        trip_updates,
+        (
+            "trip_route_id",
+            "trip_direction_id",
+            "trip_id",
+            "trip_start_timestamp",
+            "stop_id",
+            "stop_sequence",
+            "arrival_time",
+            "departure_time",
+            "arrival_delay",
+            "feed_timestamp",
+        ),
+        "trip_updates",
+    )
+    from_id, to_id = str(segment["from_stop_id"]), str(segment["to_stop_id"])
+    if from_id == to_id:
+        raise ValueError("The identity requires distinct upstream and current stops.")
+    route = trip_updates.loc[
+        trip_updates["trip_route_id"].astype("string").eq(route_id)
+    ].copy()
+    direction = _normalize_direction_ids(route["trip_direction_id"], "trip_updates")
+    route = route.loc[direction.eq(segment["trip_direction_id"])].copy()
+    clocks = pd.to_datetime(route["feed_timestamp"], utc=True, errors="raise")
+    if clocks.empty or clocks.isna().any():
+        raise ValueError("Selected route/direction requires valid publication times.")
+    start, end = clocks.min(), clocks.max()
+    selected = route.loc[
+        route["stop_id"].astype("string").isin([from_id, to_id])
+    ].copy()
+    starts = selected["trip_start_timestamp"].astype("string").str.strip()
+    publication_reason = pd.Series("included", index=selected.index, dtype="string")
+    publication_reason.loc[starts.isna() | starts.eq("")] = "missing_trip_start"
+    sequence = pd.to_numeric(selected["stop_sequence"], errors="raise")
+    invalid_sequence = sequence.isna() | sequence.le(0) | sequence.mod(1).ne(0)
+    publication_reason.loc[publication_reason.eq("included") & invalid_sequence] = (
+        "invalid_stop_sequence"
+    )
+    selected["stop_sequence"] = sequence
+    publication_audit = (
+        publication_reason.value_counts()
+        .rename_axis("reason")
+        .reset_index(name="count")
+        .assign(stage="endpoint_publications")
+    )
+    selected = selected.loc[publication_reason.eq("included")]
+    names = pd.DataFrame(
+        {
+            "stop_id": [from_id, to_id],
+            "stop_name": [segment["from_stop_name"], segment["to_stop_name"]],
+        }
+    )
+    latest = get_latest_stop_delays(selected, names, route_id=route_id)
+    if (
+        latest.groupby(["trip_instance_key", "stop_sequence"])["stop_id"]
+        .nunique()
+        .gt(1)
+        .any()
+    ):
+        raise ValueError("Endpoint reports conflict on dated stop-sequence identity.")
+    for column in ("arrival_time", "departure_time"):
+        latest[column] = pd.to_datetime(latest[column], utc=True, errors="raise")
+    current = latest.loc[latest["stop_id"].eq(to_id)].copy()
+    current["from_stop_id"] = from_id
+    current["from_stop_sequence"] = current["stop_sequence"] - 1
+    upstream = latest.loc[latest["stop_id"].eq(from_id)].rename(
+        columns={
+            column: "upstream_" + column
+            for column in latest.columns
+            if column != "trip_instance_key"
+        }
+    )
+    fields = ["arrival_time", "departure_time", "arrival_delay", "feed_timestamp"]
+    fields += [
+        column
+        for column in ("schedule_relationship", "trip_schedule_relationship")
+        if column in latest
+    ]
+    observations = current.merge(
+        upstream[
+            ["trip_instance_key", "upstream_stop_id", "upstream_stop_sequence"]
+            + ["upstream_" + column for column in fields]
+        ],
+        left_on=["trip_instance_key", "from_stop_id", "from_stop_sequence"],
+        right_on=["trip_instance_key", "upstream_stop_id", "upstream_stop_sequence"],
+        how="left",
+        validate="one_to_one",
+        indicator="upstream_match",
+    )
+    reasons = pd.Series("included", index=observations.index, dtype="string")
+    tests = [
+        (
+            "missing_consecutive_upstream_visit",
+            observations["upstream_match"].eq("left_only"),
+        )
+    ]
+    for prefix in ("", "upstream_"):
+        label = "current_" if not prefix else prefix
+        tests += [
+            (label + "missing_arrival", observations[prefix + "arrival_time"].isna()),
+            (label + "missing_delay", observations[prefix + "arrival_delay"].isna()),
+            (
+                label + "unfinished_arrival",
+                observations[prefix + "arrival_time"].gt(end),
+            ),
+        ]
+        if prefix + "schedule_relationship" in observations:
+            flags = pd.to_numeric(
+                observations[prefix + "schedule_relationship"], errors="raise"
+            )
+            tests.append((label + "skipped_or_no_data", flags.isin([1, 2])))
+        if prefix + "trip_schedule_relationship" in observations:
+            flags = pd.to_numeric(
+                observations[prefix + "trip_schedule_relationship"], errors="raise"
+            )
+            tests.append((label + "cancelled_trip", flags.isin([3, 7])))
+    observations["traversal_seconds"] = (
+        observations["arrival_time"] - observations["upstream_departure_time"]
+    ).dt.total_seconds()
+    observations["dwell_seconds"] = (
+        observations["upstream_departure_time"] - observations["upstream_arrival_time"]
+    ).dt.total_seconds()
+    tests += [
+        ("before_recording_window", observations["arrival_time"].lt(start)),
+        ("missing_upstream_departure", observations["upstream_departure_time"].isna()),
+        ("nonpositive_traversal", observations["traversal_seconds"].le(0)),
+        ("negative_dwell", observations["dwell_seconds"].lt(0)),
+    ]
+    observations["inferred_upstream_scheduled_arrival"] = observations[
+        "upstream_arrival_time"
+    ] - pd.to_timedelta(observations["upstream_arrival_delay"], unit="s")
+    observations["inferred_current_scheduled_arrival"] = observations[
+        "arrival_time"
+    ] - pd.to_timedelta(observations["arrival_delay"], unit="s")
+    observations["inferred_allowance_seconds"] = (
+        observations["inferred_current_scheduled_arrival"]
+        - observations["inferred_upstream_scheduled_arrival"]
+    ).dt.total_seconds()
+    tests.append(
+        (
+            "nonpositive_inferred_allowance",
+            observations["inferred_allowance_seconds"].le(0),
+        )
+    )
+    for reason, mask in tests:
+        reasons.loc[reasons.eq("included") & mask] = reason
+    pair_audit = (
+        reasons.value_counts()
+        .rename_axis("reason")
+        .reset_index(name="count")
+        .assign(stage="visit_pairs")
+    )
+    audit = pd.concat([publication_audit, pair_audit], ignore_index=True)
+    if audit["reason"].ne("included").any():
+        warnings.warn(
+            "Some full-cache stop-pair observations were excluded; inspect identity audit.",
+            UserWarning,
+            stacklevel=2,
+        )
+    observations = (
+        observations.loc[reasons.eq("included")].drop(columns="upstream_match").copy()
+    )
+    numeric = [
+        "arrival_delay",
+        "upstream_arrival_delay",
+        "traversal_seconds",
+        "dwell_seconds",
+        "inferred_allowance_seconds",
+    ]
+    if (
+        observations.empty
+        or not np.isfinite(observations[numeric].to_numpy(dtype=float)).all()
+    ):
+        raise ValueError("Identity requires eligible finite endpoint measurements.")
+    observations["arrival_day"] = (
+        observations["arrival_time"].dt.tz_convert(display_timezone).dt.normalize()
+    )
+    observations["identity_delay_seconds"] = (
+        observations["upstream_arrival_delay"]
+        + observations["traversal_seconds"]
+        + observations["dwell_seconds"]
+        - observations["inferred_allowance_seconds"]
+    )
+    observations["delta_delay_seconds"] = (
+        observations["arrival_delay"] - observations["upstream_arrival_delay"]
+    )
+    observations["residual_seconds"] = (
+        observations["arrival_delay"] - observations["identity_delay_seconds"]
+    )
+    reference = segment.copy()
+    reference["reference_shape_id"] = reference.get("shape_id", pd.NA)
+    reference["shape_id"] = pd.NA
+    reference["scope"] = "full_cache_directed_stop_pair"
+    return StopDynamicsIdentity(
+        segment=reference,
+        observations=observations.reset_index(drop=True),
+        audit=audit,
+    )
 
 
 def fit_stop_dynamics_model(
@@ -315,6 +594,31 @@ def fit_stop_dynamics_model(
     observations["residual_seconds"] = (
         observations["arrival_delay"] - observations["predicted_delay_seconds"]
     )
+    return StopDynamicsModel(
+        segment=analysis.segment.copy(),
+        coefficients=coefficients,
+        hourly_baselines=baselines,
+        observations=observations.reset_index(drop=True),
+        metrics=_score_stop_dynamics(observations),
+        audit=audit,
+        holdout_start=holdout_start,
+        baseline_timezone=baseline_timezone,
+    )
+
+
+def _score_stop_dynamics(observations: pd.DataFrame) -> pd.DataFrame:
+    """Score original signed outcomes for identical visits and comparators.
+
+    Parameters
+    ----------
+    observations : pandas.DataFrame
+        Original outcomes, comparator values and descriptive split labels.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Count, MAE, RMSE, R-squared and explicit undefined-score reasons.
+    """
     rows = []
     for split, subset in observations.groupby("split", sort=False):
         y = subset["arrival_delay"].to_numpy(dtype=float)
@@ -343,13 +647,4 @@ def fit_stop_dynamics_model(
                     "r2_undefined_reason": reason,
                 }
             )
-    return StopDynamicsModel(
-        segment=analysis.segment.copy(),
-        coefficients=coefficients,
-        hourly_baselines=baselines,
-        observations=observations.reset_index(drop=True),
-        metrics=pd.DataFrame(rows),
-        audit=audit,
-        holdout_start=holdout_start,
-        baseline_timezone=baseline_timezone,
-    )
+    return pd.DataFrame(rows)

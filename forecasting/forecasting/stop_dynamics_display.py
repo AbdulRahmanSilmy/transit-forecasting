@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from .stop_dynamics_eda import SegmentTimingEDA, StopDynamicsEDA
-from .stop_dynamics_model import StopDynamicsModel
+from .stop_dynamics_model import StopDynamicsIdentity, StopDynamicsModel
 
 
 def make_stop_dynamics_model_figure(
@@ -115,6 +115,102 @@ def make_stop_dynamics_model_figure(
             f"{segment['trip_direction_id']}: retrospective dynamics "
             f"{'training' if split == 'train' else 'holdout'}"
         ),
+        height=850,
+        hovermode="x unified",
+        hoversubplots="axis",
+        legend=dict(orientation="h", x=0, y=-0.18, yanchor="top"),
+        margin=dict(t=110, b=160),
+    )
+    return figure
+
+
+def make_stop_dynamics_identity_figure(
+    result: StopDynamicsIdentity,
+    *,
+    display_timezone: str = "America/Vancouver",
+) -> go.Figure:
+    """Show delay accounting for every eligible visit without model comparisons.
+
+    Parameters
+    ----------
+    result : StopDynamicsIdentity
+        Full-data endpoint observations and feed-inferred scheduled allowances.
+    display_timezone : str, default "America/Vancouver"
+        Timezone for destination-arrival timestamps.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        Current delay and segment delay-change rows, in minutes, comparing
+        reported values only with the exact accounting identity. No fitting,
+        data splitting, displaying, saving or input mutation is performed.
+
+    Raises
+    ------
+    ValueError
+        If no eligible visits are available.
+    """
+    visits = result.observations.sort_values("arrival_time")
+    if visits.empty:
+        raise ValueError("No visits available for the delay identity figure.")
+    times = visits["arrival_time"].dt.tz_convert(display_timezone).tolist()
+    figure = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.12,
+        subplot_titles=(
+            "Current arrival delay: reported and reconstructed",
+            "Delay gained / recovered: reported and T + W - S_trip",
+        ),
+    )
+    accounting_change = (
+        visits["traversal_seconds"]
+        + visits["dwell_seconds"]
+        - visits["inferred_allowance_seconds"]
+    )
+    for values, label, color, row in (
+        (visits["arrival_delay"], "Reported current delay", "black", 1),
+        (visits["identity_delay_seconds"], "Identity current delay", "royalblue", 1),
+        (visits["delta_delay_seconds"], "Reported delay change", "firebrick", 2),
+        (accounting_change, "T + W - S_trip", "seagreen", 2),
+    ):
+        figure.add_trace(
+            go.Scattergl(
+                x=times,
+                y=values / 60,
+                mode="markers",
+                name=label,
+                marker=dict(color=color, size=6, opacity=0.6),
+                customdata=visits[
+                    [
+                        "trip_instance_key",
+                        "traversal_seconds",
+                        "dwell_seconds",
+                        "inferred_allowance_seconds",
+                    ]
+                ],
+                hovertemplate=(
+                    "%{x}<br>Journey: %{customdata[0]}"
+                    "<br>T: %{customdata[1]:.0f} s<br>W: %{customdata[2]:.0f} s"
+                    "<br>S_trip: %{customdata[3]:.0f} s"
+                    "<br>Delay: %{y:.2f} min<extra>%{fullData.name}</extra>"
+                ),
+            ),
+            row=row,
+            col=1,
+        )
+    figure.add_hline(y=0, line_dash="dot", line_color="gray", row=2, col=1)
+    figure.update_yaxes(title_text="Current delay (min)", row=1, col=1)
+    figure.update_yaxes(title_text="Delay change (min)", row=2, col=1)
+    figure.update_yaxes(fixedrange=False)
+    figure.update_xaxes(
+        title_text=f"Destination arrival ({display_timezone})",
+        row=2,
+        col=1,
+    )
+    figure.update_layout(
+        title=f"Segment {result.segment['segment_id']}: full-data delay accounting",
         height=850,
         hovermode="x unified",
         hoversubplots="axis",

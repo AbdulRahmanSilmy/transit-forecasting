@@ -14,7 +14,8 @@ research workflows, not a deployed arrival-prediction service.
 | [route_97_speed_congestion_analysis.ipynb](route_97_speed_congestion_analysis.ipynb) | What do vehicle speed probes say about Route 97 congestion, and could upstream congestion explain remaining stop-delay prediction error? | Directed segment geometry, speed comparisons, fresh/stale maps, animations, probe support and stop-delay feasibility dashboards. |
 | [route_97_delay_congestion_and_propagation.ipynb](route_97_delay_congestion_and_propagation.ipynb) | Where do Route 97 buses gain or recover delay, and do unusual delays persist locally or propagate? | Audited stop-to-stop delay changes, coverage, replay maps, event responses, same-bus carry-over and time-space diagrams. |
 | [route_97_recurring_segment_delay_prediction.ipynb](route_97_recurring_segment_delay_prediction.ipynb) | Can scheduled time-of-day and weekday patterns predict recurring signed segment delay changes? | Calendar-average and XGBoost comparisons, blocked validation, a final held-out week, tail diagnostics and saved model/evaluation bundles. |
-| [dynamics_model.ipynb](dynamics_model.ipynb) | How do same-journey upstream delay, traversal and upstream dwell relate to downstream delay on Highway 97 segment 4? | Shared preprocessing, coverage/journey EDA, a fitted stop-to-stop equation with training-only hourly baselines, and evaluation on the last seven observed arrival days. Uses completed feed estimates, not pre-arrival forecasting inputs. |
+| [dynamics_model.ipynb](dynamics_model.ipynb) | How does arrival-delay accounting work on Highway 97 segment 4's directed stop pair? | Current-GTFS EDA plus a full-data dynamics explanation, per-visit feed-inferred scheduled allowances, delay time series, allowance distribution/time series and a 1:1 agreement scatter. No fitting, holdouts or competing approaches; exact agreement is circular, not forecast skill. A basis for future traversal/dwell prediction. |
+| [segment_4_delay_identity_check.ipynb](segment_4_delay_identity_check.ipynb) | Does reported delay change equal traversal plus upstream dwell minus the scheduled arrival interval? | Standalone offline segment 4 check against bundled GTFS, endpoint-delay consistency, one-second agreement rates and discrepant examples. No model fitting or dependency on running the dynamics notebook. |
 
 ## Recommended reading order
 
@@ -25,11 +26,18 @@ research workflows, not a deployed arrival-prediction service.
    existing lateness from delay gained or recovered on a segment.
 3. Run the recurring segment-delay prediction experiment to test the calendar
    hypothesis on held-out service days.
-4. Use the dynamics notebook to inspect individual journeys and fit the
-   retrospective segment 4 equation. Run its Preprocessing section first;
-   EDA and Modelling can then be run independently. Coefficients, hourly
-   baselines/support, audit, metadata, metrics and predictions are saved as
-   CSV alongside HTML plots under `visuals/dynamics_model_notebook/`.
+4. Use the dynamics notebook to inspect individual journeys and evaluate the
+   exact segment 4 delay identity. Run its Preprocessing section first;
+   EDA and Modelling can then be run independently. Per-visit inferred schedules,
+   allowances and accounting values, allowance summaries, eligibility audit,
+   metadata and an identity calculation check are saved as CSV alongside
+   `segment_4_dynamics_identity_timeseries.html`,
+   `segment_4_dynamics_identity_scatter.html`,
+   `segment_4_dynamics_scheduled_allowances.html` and
+   `segment_4_dynamics_scheduled_allowances_timeseries.html` under
+   `visuals/dynamics_model_notebook/`.
+   The allowance time series uses scheduled upstream arrivals in Vancouver
+   local time, with one point per visit and day/week/month controls.
    This notebook pins the two-month cache and runs offline from either the
    repository root or the notebooks directory.
 
@@ -113,15 +121,19 @@ or saved outputs.
   scheduled upstream arrival, weekday and directed segment identity. It does
   not forecast unexpected incidents or consume actual endpoint delays as
   inputs.
-- **Retrospective dynamics equation:** downstream arrival delay fitted from
-  the same dated journey's upstream arrival delay and deviations of completed
-  traversal/upstream dwell from training-only hourly medians. The hourly
-  reference clock is Vancouver local upstream arrival. Missing training hours
-  use explicitly labelled global training medians. The last seven observed
-  local destination-arrival days are held out; training endpoint publications
-  must precede that boundary and training/holdout journeys cannot overlap.
-  Completed traversal includes the target arrival timestamp, so chronological
-  separation does not make this an operational forecasting evaluation.
+- **Retrospective delay identity:** downstream delay equals upstream delay
+  plus completed traversal and upstream dwell minus the scheduled allowance.
+  Infer each endpoint's schedule as its reported arrival time minus delay.
+  Pair exact directed stop IDs and consecutive numeric sequences within a
+  reliably dated realtime journey, without requiring a historical trip ID to
+  match current GTFS. Historical shape identity is unconfirmed. No coefficients
+  or hourly baselines are fitted; all eligible visits are shown together without
+  holdouts or competing approaches. Same-visit allowance
+  inference uses the downstream outcome, guaranteeing agreement by construction.
+  The separate identity-check notebook retains an independent GTFS comparison.
+  Future forecasts must use an independently available scheduled allowance
+  with predicted traversal/dwell, not an allowance derived from the target
+  visit's downstream outcome.
 
 Final reported times and delays are reference proxies, not independently
 measured arrivals. Delay changes include dwell, holding, schedule slack and
