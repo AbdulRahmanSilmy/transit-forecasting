@@ -6,6 +6,7 @@ import pytest
 from forecasting import (
     make_segment_timing_figure,
     prepare_segment_timing_eda,
+    prepare_segment_traversal_eda,
     prepare_stop_dynamics_eda,
     run_congestion_engine,
 )
@@ -522,6 +523,117 @@ def _timing_updates(**kwargs):
         "30s"
     )
     return updates
+
+
+def _full_cache_timing_updates():
+    return _timing_updates().assign(
+        trip_id="historical-not-in-GTFS",
+        stop_sequence=[1, 2, 3],
+        arrival_delay=np.nan,
+    )
+
+
+def _full_cache_timing(updates, **kwargs):
+    segment = pd.Series(
+        {
+            "segment_id": 4,
+            "trip_direction_id": 0,
+            "shape_id": "reference",
+            "from_stop_id": "a",
+            "to_stop_id": "b",
+            "from_stop_name": "First",
+            "to_stop_name": "Second",
+        }
+    )
+    return prepare_segment_traversal_eda(updates, segment, **kwargs)
+
+
+def test_full_cache_timing_keeps_historical_trips_without_delays_and_preserves_inputs():
+    updates = _full_cache_timing_updates()
+    original = updates.copy(deep=True)
+    result = _full_cache_timing(updates)
+    assert result.observations.traversal_seconds.tolist() == [90]
+    assert result.observations.dwell_seconds.tolist() == [30]
+    assert pd.isna(result.segment.shape_id)
+    assert result.segment.reference_shape_id == "reference"
+    assert result.bins.traversal_count.sum() == 1
+    pdt.assert_frame_equal(updates, original)
+    updates.loc[0, "arrival_time"] = pd.NaT
+    with pytest.warns(UserWarning, match="excluded"):
+        missing_arrival = _full_cache_timing(updates)
+    assert missing_arrival.observations.traversal_seconds.tolist() == [90]
+    assert missing_arrival.observations.dwell_seconds.isna().all()
+
+
+def test_full_cache_timing_retains_late_upstream_publication_for_label_availability():
+    updates = _full_cache_timing_updates()
+    late_upstream = updates.iloc[[0]].copy()
+    late_upstream["feed_timestamp"] = updates.feed_timestamp.max() + pd.Timedelta(
+        hours=2
+    )
+    late_upstream["id"] = 100
+    result = _full_cache_timing(pd.concat([updates, late_upstream], ignore_index=True))
+    observation = result.observations.iloc[0]
+    assert observation.upstream_feed_timestamp == late_upstream.feed_timestamp.iloc[0]
+    assert observation.upstream_feed_timestamp > observation.feed_timestamp
+    assert observation.traversal_seconds == 90
+
+
+def test_full_cache_timing_latest_missing_departure_does_not_use_older_report():
+    updates = _full_cache_timing_updates()
+    second = updates.copy()
+    second["trip_start_timestamp"] = "second-journey"
+    last = updates.iloc[[0]].assign(id=100, departure_time=pd.NaT)
+    rows = pd.concat([updates, second, last], ignore_index=True)
+    with pytest.warns(UserWarning, match="excluded"):
+        result = _full_cache_timing(rows)
+    assert result.observations.traversal_seconds.notna().sum() == 1
+    assert "missing_upstream_departure" in result.audit.reason.tolist()
+
+
+@pytest.mark.parametrize(
+    "change,reason",
+    [
+        ("missing_start", "missing_trip_start"),
+        ("gap", "missing_upstream_visit"),
+        ("skip", "upstream_skipped_visit"),
+        ("cancel", "upstream_cancelled_trip"),
+        ("future", "unfinished_arrival"),
+        ("reverse", "missing_upstream_visit"),
+    ],
+)
+def test_full_cache_timing_exclusions_do_not_bridge_visits(change, reason):
+    updates = _full_cache_timing_updates()
+    second = updates.copy()
+    second["trip_start_timestamp"] = "second-journey"
+    if change == "missing_start":
+        updates.loc[0, "trip_start_timestamp"] = None
+    elif change == "gap":
+        updates.loc[0, "stop_sequence"] = 4
+    elif change == "skip":
+        updates.loc[0, "schedule_relationship"] = 1
+    elif change == "cancel":
+        updates.loc[0, "trip_schedule_relationship"] = 3
+    elif change == "reverse":
+        updates.loc[0, "trip_direction_id"] = 1
+    else:
+        updates.loc[1, "arrival_time"] += pd.Timedelta(days=1)
+    with pytest.warns(UserWarning, match="excluded"):
+        result = _full_cache_timing(pd.concat([updates, second], ignore_index=True))
+    assert result.observations.traversal_seconds.notna().sum() == 1
+    assert reason in result.audit.reason.tolist()
+
+
+def test_full_cache_timing_conflicts_empty_cohort_and_invalid_bins_are_explicit():
+    updates = _full_cache_timing_updates()
+    updates.loc[0, "stop_sequence"] = 2
+    with pytest.raises(ValueError, match="conflict"):
+        _full_cache_timing(updates)
+    with pytest.warns(UserWarning, match="excluded"):
+        with pytest.raises(ValueError, match="No usable"):
+            _full_cache_timing(_full_cache_timing_updates().iloc[[1, 2]])
+    with pytest.raises(ValueError, match="positive"):
+        _full_cache_timing(_full_cache_timing_updates(), time_bin_size="0min")
 
 
 def test_timing_uses_upstream_dwell_and_shares_only_departure_boundary():

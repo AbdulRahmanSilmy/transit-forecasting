@@ -15,7 +15,8 @@ research workflows, not a deployed arrival-prediction service.
 | [route_97_delay_congestion_and_propagation.ipynb](route_97_delay_congestion_and_propagation.ipynb) | Where do Route 97 buses gain or recover delay, and do unusual delays persist locally or propagate? | Audited stop-to-stop delay changes, coverage, replay maps, event responses, same-bus carry-over and time-space diagrams. |
 | [route_97_recurring_segment_delay_prediction.ipynb](route_97_recurring_segment_delay_prediction.ipynb) | Can scheduled time-of-day and weekday patterns predict recurring signed segment delay changes? | Calendar-average and XGBoost comparisons, blocked validation, a final held-out week, tail diagnostics and saved model/evaluation bundles. |
 | [dynamics_model.ipynb](dynamics_model.ipynb) | How does arrival-delay accounting work on Highway 97 segment 4's directed stop pair? | Current-GTFS EDA plus a full-data dynamics explanation, per-visit feed-inferred scheduled allowances, delay time series, allowance distribution/time series and a 1:1 agreement scatter. No fitting, holdouts or competing approaches; exact agreement is circular, not forecast skill. A basis for future traversal/dwell prediction. |
-| [segment_4_delay_identity_check.ipynb](segment_4_delay_identity_check.ipynb) | Does reported delay change equal traversal plus upstream dwell minus the scheduled arrival interval? | Standalone offline segment 4 check against bundled GTFS, endpoint-delay consistency, one-second agreement rates and discrepant examples. No model fitting or dependency on running the dynamics notebook. |
+| [segment_4_traversal_time_eda.ipynb](segment_4_traversal_time_eda.ipynb) | Which calendar and dynamic patterns should a segment 4 traversal-time model represent? | Separate offline full-cache timing EDA: eligibility/coverage, aggregation support, weekday/hour profiles, robust candidate episodes, residual drift and gap-preserving lag correlations. Recommends calendar-plus-dynamic-residual candidates and an as-of, chronological modelling methodology; no fitting or selected forecast horizon. |
+| [segment_4_harmonic_traversal_regression.ipynb](segment_4_harmonic_traversal_regression.ipynb) | Can a calendar-only harmonic model learn typical segment 4 traversal time without following isolated spikes? | Custom sklearn daily/weekly Fourier transformer, Huber-loss L1 regression via weighted Lasso, ordinary Lasso and median comparisons, chronological development/final blocks, spike-injection sensitivity, and saved recurring patterns/residuals. |
 
 ## Recommended reading order
 
@@ -40,6 +41,50 @@ research workflows, not a deployed arrival-prediction service.
    local time, with one point per visit and day/week/month controls.
    This notebook pins the two-month cache and runs offline from either the
    repository root or the notebooks directory.
+5. Use the segment 4 traversal-time EDA before fitting a road-duration model.
+   It pins the same two-month cache and exact direction-0 endpoint IDs, but
+   validates traversal independently of delays, dwell and inferred allowances.
+   Historical trip IDs need not match current GTFS; consecutive numeric
+   realtime sequences are required and historical shape is unconfirmed.
+   Coverage uses a local 03:00-cutover service-day proxy; fixed-grid lags use UTC.
+   All-sample calendar centring and MAD outlier scores are descriptive only.
+   The notebook saves eight standalone HTML figures and CSV evidence under
+   `visuals/segment_4_traversal_time_eda/`, overwriting only its own exports.
+   It proposes per-bus or next-window forecasting, train-only preprocessing,
+   label-receipt guards and blocked validation. Because EDA inspects the full
+   cache, a genuinely blind final evaluation needs an untouched future period.
+6. Run the harmonic traversal notebook to fit the recurring component only.
+   It uses the same offline cache and endpoint identity, low-order local
+   daily/weekly harmonics and interactions, and log-duration targets. Huber
+   loss bounds spike amplitude influence while the L1 penalty shrinks
+   unnecessary harmonics; valid slow journeys are retained. Two seven-day
+   development blocks select orders/alpha before an exploratory final week,
+   with 28 observed training days, a one-day embargo and both-endpoint label
+   publication guards. Saved pipelines predict **log minutes**; exponentiate
+   once. New bundles under `data/segment_harmonic_models/` contain provenance,
+   splits, scores, fitting weights, profiles, spike sensitivity, residuals
+   and self-contained HTML figures, including separate in-sample training
+   and reserved-week traversal time series. A separate paired comparison uses
+   the first downstream and as-of upstream reports to invert the delay identity
+   into a zero-dwell traversal estimate. The frozen harmonic model predicts at
+   the early-implied scheduled upstream time, never the final departure. Both
+   methods are scored on the same eligible reserved-week visits against latest
+   endpoint traversal with observed dwell removed. Origin guards, coverage,
+   schedule revisions, paired errors and daily scores are reported; latest
+   feed values remain reference proxies, not independent ground truth.
+   Training comparisons are shown separately as in-sample diagnostics. Both
+   comparison time series include a second row for minutes between earliest
+   publication and the early-implied scheduled downstream arrival. Two
+   method-specific prediction-versus-reference scatter figures separate
+   training and reserved-week panels and use prediction on X, reference on Y.
+   Each scatter panel reports its own count, MAE, median absolute error, RMSE
+   and signed bias (prediction minus reference); error metrics are in minutes.
+   All eight plots are also exported to
+   [`visuals/segment_4_harmonic_traversal_regression/`](visuals/segment_4_harmonic_traversal_regression/);
+   subsequent runs update only this notebook's named HTML files there while
+   experiment bundles remain archived. This is not an operational as-of replay
+   or an incident predictor. Train a separate residual/spike component using
+   out-of-fold calendar predictions and independently available inputs.
 
 The database-size notebook is an optional capacity check. The broad prototype
 provides development context but is not required by the other notebooks.

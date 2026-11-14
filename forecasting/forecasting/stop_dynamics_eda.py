@@ -72,13 +72,17 @@ class SegmentTimingEDA:
     Attributes
     ----------
     segment : pandas.Series
-        Directed, shape-specific segment metadata from ``StopDynamicsEDA``.
+        Directed segment metadata. Full-cache preparation retains the catalogue
+        shape as ``reference_shape_id`` only; historical shape is unconfirmed.
     observations : pandas.DataFrame
         Latest destination visits and their exact upstream endpoints (UTC).
         ``traversal_seconds`` spans upstream departure to destination arrival;
         ``dwell_seconds`` spans upstream arrival to upstream departure.
         They have independent exclusion reasons; unavailable durations remain
         missing. Both use destination arrival as their plotting/binning anchor.
+        When provided, ``upstream_feed_timestamp`` retains the upstream final
+        publication for train-cutoff availability checks alongside the
+        destination ``feed_timestamp``.
     bins : pandas.DataFrame
         Complete UTC grid with duration medians, independent observation counts,
         and full-snapshot baselines in seconds. Baselines weight each valid
@@ -723,23 +727,11 @@ def prepare_segment_timing_eda(analysis: StopDynamicsEDA) -> SegmentTimingEDA:
         recording_start=analysis.recording_start,
         recording_end=analysis.recording_end,
     )
-    bins = pd.DataFrame(index=analysis.speed_bins.index)
-    audit_rows = []
-    for metric in ("traversal", "dwell"):
-        reasons = observations[f"{metric}_exclusion_reason"]
-        usable = observations.loc[reasons.eq("included")].copy()
-        usable["time_bin"] = usable["arrival_time"].dt.floor(analysis.time_bin_size)
-        grouped = usable.groupby("time_bin")[f"{metric}_seconds"]
-        bins[f"median_{metric}_seconds"] = grouped.median().reindex(bins.index)
-        bins[f"{metric}_count"] = (
-            grouped.count().reindex(bins.index, fill_value=0).astype("int64")
-        )
-        bins[f"baseline_{metric}_seconds"] = usable[f"{metric}_seconds"].median()
-        audit_rows.extend(
-            {"metric": metric, "reason": reason, "count": int(count)}
-            for reason, count in reasons.value_counts().items()
-        )
-    audit = pd.DataFrame(audit_rows, columns=["metric", "reason", "count"])
+    bins, audit = _summarize_segment_timings(
+        observations,
+        analysis.speed_bins.index,
+        analysis.time_bin_size,
+    )
     if (
         audit["reason"].ne("included").any()
         or bins["traversal_count"].sum() == 0
@@ -757,6 +749,209 @@ def prepare_segment_timing_eda(analysis: StopDynamicsEDA) -> SegmentTimingEDA:
         bins=bins,
         audit=audit,
     )
+
+
+def prepare_segment_traversal_eda(
+    trip_updates: pd.DataFrame,
+    segment: pd.Series,
+    *,
+    route_id: str = "97-KEL",
+    time_bin_size: str = "15min",
+) -> SegmentTimingEDA:
+    """Prepare full-cache traversal/dwell EDA for an exact directed stop pair.
+
+    Use reliable dated journeys and consecutive numeric realtime sequences,
+    without requiring historical trip IDs to match the bundled GTFS. This
+    conservative rule does not bridge missing or nonconsecutively numbered
+    visits. Reuse latest-row selection and independent timing validation from
+    the stop-dynamics EDA. Missing delays, upstream arrivals or inferred
+    scheduled allowances do not invalidate otherwise usable traversals.
+
+    Parameters
+    ----------
+    trip_updates : pandas.DataFrame
+        Cached trip reports with route/direction, trip/start identity,
+        stop sequence, arrival/departure times, publication times and
+        ``arrival_delay`` (which may be missing).
+    segment : pandas.Series
+        Reference catalogue row with direction, distinct endpoint IDs and names.
+    route_id : str, default "97-KEL"
+        Route to select.
+    time_bin_size : str, default "15min"
+        Positive fixed UTC bin duration, anchored by destination arrival.
+
+    Returns
+    -------
+    SegmentTimingEDA
+        All candidate destination visits with independent duration exclusions,
+        complete arrival-anchored bins and publication/pair eligibility audit.
+        Full-snapshot medians are descriptive, not forecasting baselines.
+        Inputs are not modified and historical shape identity is unconfirmed.
+
+    Raises
+    ------
+    ValueError
+        For invalid inputs, conflicting endpoint sequence identities, or no
+        usable completed traversal.
+
+    Warns
+    -----
+    UserWarning
+        When endpoint publications or duration pairs are excluded.
+    """
+    _require_columns(
+        trip_updates,
+        (
+            "trip_route_id",
+            "trip_direction_id",
+            "trip_id",
+            "trip_start_timestamp",
+            "stop_id",
+            "stop_sequence",
+            "arrival_time",
+            "departure_time",
+            "arrival_delay",
+            "feed_timestamp",
+        ),
+        "trip_updates",
+    )
+    if not isinstance(route_id, str) or not route_id.strip():
+        raise ValueError("route_id must be a nonempty string.")
+    if not isinstance(time_bin_size, str):
+        raise ValueError("time_bin_size must be a positive fixed duration.")
+    duration = pd.Timedelta(time_bin_size)
+    if pd.isna(duration) or duration <= pd.Timedelta(0):
+        raise ValueError("time_bin_size must be a positive fixed duration.")
+    from_id, to_id = str(segment["from_stop_id"]), str(segment["to_stop_id"])
+    if from_id == to_id:
+        raise ValueError("Traversal EDA requires distinct endpoint stops.")
+    direction = _normalize_direction_ids(
+        pd.Series([segment["trip_direction_id"]]), "segment"
+    ).iloc[0]
+    if pd.isna(direction):
+        raise ValueError("The segment requires a known direction.")
+    route = trip_updates.loc[
+        trip_updates["trip_route_id"].astype("string").eq(route_id)
+    ].copy()
+    directions = _normalize_direction_ids(route["trip_direction_id"], "trip_updates")
+    route = route.loc[directions.eq(direction)].copy()
+    clocks = pd.to_datetime(route["feed_timestamp"], utc=True, errors="raise")
+    if clocks.empty or clocks.isna().any():
+        raise ValueError("Selected route/direction requires valid publication times.")
+    start, end = clocks.min(), clocks.max()
+    selected = route.loc[
+        route["stop_id"].astype("string").isin([from_id, to_id])
+    ].copy()
+    starts = selected["trip_start_timestamp"].astype("string").str.strip()
+    reasons = pd.Series("included", index=selected.index, dtype="string")
+    reasons.loc[starts.isna() | starts.eq("")] = "missing_trip_start"
+    sequence = pd.to_numeric(selected["stop_sequence"], errors="raise")
+    invalid = sequence.isna() | sequence.le(0) | sequence.mod(1).ne(0)
+    reasons.loc[reasons.eq("included") & invalid] = "invalid_stop_sequence"
+    selected["stop_sequence"] = sequence
+    publication_audit = (
+        reasons.value_counts()
+        .rename_axis("reason")
+        .reset_index(name="count")
+        .assign(metric="endpoint_publications")
+    )
+    names = pd.DataFrame(
+        {
+            "stop_id": [from_id, to_id],
+            "stop_name": [segment["from_stop_name"], segment["to_stop_name"]],
+        }
+    )
+    latest = get_latest_stop_delays(
+        selected.loc[reasons.eq("included")],
+        names,
+        route_id=route_id,
+    )
+    if (
+        latest.groupby(["trip_instance_key", "stop_sequence"])["stop_id"]
+        .nunique()
+        .gt(1)
+        .any()
+    ):
+        raise ValueError("Endpoint reports conflict on dated stop-sequence identity.")
+    current = latest.loc[latest["stop_id"].eq(to_id)].copy()
+    current["from_stop_id"] = from_id
+    current["from_stop_sequence"] = current["stop_sequence"] - 1
+    observations = _segment_timing_observations(
+        current,
+        latest.loc[latest["stop_id"].eq(from_id)],
+        recording_start=start,
+        recording_end=end,
+    )
+    bin_index = pd.date_range(
+        start.floor(time_bin_size),
+        end.floor(time_bin_size),
+        freq=time_bin_size,
+    )
+    bins, pair_audit = _summarize_segment_timings(
+        observations,
+        bin_index,
+        time_bin_size,
+    )
+    audit = pd.concat([publication_audit, pair_audit], ignore_index=True)
+    if audit["reason"].ne("included").any():
+        warnings.warn(
+            "Some full-cache segment timings were excluded; inspect timing audit.",
+            UserWarning,
+            stacklevel=2,
+        )
+    if bins["traversal_count"].sum() == 0:
+        raise ValueError("No usable completed traversals for the selected stop pair.")
+    reference = segment.copy()
+    reference["reference_shape_id"] = reference.get("shape_id", pd.NA)
+    reference["shape_id"] = pd.NA
+    reference["scope"] = "full_cache_directed_stop_pair"
+    return SegmentTimingEDA(
+        segment=reference,
+        observations=observations,
+        bins=bins,
+        audit=audit,
+    )
+
+
+def _summarize_segment_timings(
+    observations: pd.DataFrame,
+    bin_index: pd.DatetimeIndex,
+    time_bin_size: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Summarize independently eligible durations on a complete arrival grid.
+
+    Parameters
+    ----------
+    observations : pandas.DataFrame
+        Paired visits with duration values and exclusion reasons.
+    bin_index : pandas.DatetimeIndex
+        Complete UTC grid covering the recording window.
+    time_bin_size : str
+        Positive fixed bin duration.
+
+    Returns
+    -------
+    tuple[pandas.DataFrame, pandas.DataFrame]
+        Duration medians, counts and full-snapshot baselines; eligibility audit.
+    """
+    bins = pd.DataFrame(index=bin_index)
+    audit_rows = []
+    for metric in ("traversal", "dwell"):
+        reasons = observations[f"{metric}_exclusion_reason"]
+        usable = observations.loc[reasons.eq("included")].copy()
+        usable["time_bin"] = usable["arrival_time"].dt.floor(time_bin_size)
+        grouped = usable.groupby("time_bin")[f"{metric}_seconds"]
+        bins[f"median_{metric}_seconds"] = grouped.median().reindex(bins.index)
+        bins[f"{metric}_count"] = (
+            grouped.count().reindex(bins.index, fill_value=0).astype("int64")
+        )
+        bins[f"baseline_{metric}_seconds"] = usable[f"{metric}_seconds"].median()
+        audit_rows.extend(
+            {"metric": metric, "reason": reason, "count": int(count)}
+            for reason, count in reasons.value_counts().items()
+        )
+    audit = pd.DataFrame(audit_rows, columns=["metric", "reason", "count"])
+    return bins, audit
 
 
 def _segment_timing_observations(
@@ -794,7 +989,11 @@ def _segment_timing_observations(
     ]
     upstream_columns += [
         c
-        for c in ("schedule_relationship", "trip_schedule_relationship")
+        for c in (
+            "feed_timestamp",
+            "schedule_relationship",
+            "trip_schedule_relationship",
+        )
         if c in preceding
     ]
     upstream = preceding[upstream_columns].rename(

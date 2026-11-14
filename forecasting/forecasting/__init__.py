@@ -25,6 +25,12 @@ from .delay_propagation_display import (
     make_propagation_heatmap,
     make_time_space_diagram,
 )
+from .harmonic_regression import (
+    CalendarHarmonics,
+    HuberLassoRegressor,
+    make_harmonic_time_splits,
+    save_harmonic_experiment,
+)
 from .road_segment_congestion import (
     CongestionResult,
     build_route_segments,
@@ -43,6 +49,14 @@ from .segment_delay_model import (
     save_segment_delay_experiment,
     segment_delay_metrics,
     summarize_segment_delay_uplift,
+)
+from .segment_traversal_comparison import (
+    EarlyTraversalComparison,
+    prepare_early_traversal_comparison,
+)
+from .segment_traversal_comparison_display import (
+    make_traversal_comparison_timeseries,
+    make_traversal_prediction_scatter,
 )
 from .segment_traversal_speed import get_segment_traversal_speeds
 from .static_gtfs import download_static_gtfs
@@ -64,6 +78,7 @@ from .stop_dynamics_eda import (
     SegmentTimingEDA,
     StopDynamicsEDA,
     prepare_segment_timing_eda,
+    prepare_segment_traversal_eda,
     prepare_stop_dynamics_eda,
 )
 from .stop_dynamics_model import (
@@ -86,9 +101,12 @@ from .trip_updates import (
 
 __all__ = [
     "BacktestDataset",
+    "CalendarHarmonics",
     "CongestionResult",
     "DelayCongestionResult",
     "DelayModelConfig",
+    "EarlyTraversalComparison",
+    "HuberLassoRegressor",
     "SegmentDelayData",
     "SegmentTimingEDA",
     "StopCongestionAnalysis",
@@ -114,6 +132,7 @@ __all__ = [
     "make_congestion_map",
     "make_delay_congestion_map",
     "make_delay_event_plot",
+    "make_harmonic_time_splits",
     "make_propagation_heatmap",
     "make_stop_congestion_cohort_figures",
     "make_stop_congestion_example",
@@ -122,13 +141,17 @@ __all__ = [
     "make_stop_dynamics_model_figure",
     "make_time_space_diagram",
     "make_trip_dynamics_figure",
+    "make_traversal_comparison_timeseries",
+    "make_traversal_prediction_scatter",
     "make_segment_delay_splits",
     "order_route_segments",
     "prepare_congestion_snapshots",
     "prepare_delay_congestion_snapshots",
+    "prepare_early_traversal_comparison",
     "prepare_stop_congestion_analysis",
     "prepare_stop_dynamics_eda",
     "prepare_segment_timing_eda",
+    "prepare_segment_traversal_eda",
     "prepare_trip_dynamics_eda",
     "prepare_segment_delay_data",
     "run_congestion_engine",
@@ -136,6 +159,7 @@ __all__ = [
     "run_segment_delay_experiment",
     "same_bus_propagation",
     "save_backtest_dataset",
+    "save_harmonic_experiment",
     "save_segment_delay_experiment",
     "select_delay_events",
     "select_trip_dynamics_examples",
