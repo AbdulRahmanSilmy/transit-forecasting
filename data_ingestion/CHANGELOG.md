@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and this project uses Semantic Versioning.
 
+## [0.2.1] - 2026-11-17
+
+### Fixed
+- Capped the ingestion log file with a rotating handler (4 x 10 MB) so the long-running service no longer grows it without bound.
+- Capped Docker `json-file` logs for every Compose service at 3 x 10 MB.
+- Disabled MySQL binary logging, which this single-node setup does not use and which retained several GB of insert history on the Raspberry Pi.
+
 ## [0.2.0] - 2026-06-13
 
 ### Added

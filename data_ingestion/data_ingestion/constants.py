@@ -34,6 +34,10 @@ REQUIRED_INGESTION_KEYS = [
 ]
 
 LOGGING_FILE_KEY = "logging_file"
+# Size cap for the rotating ingestion log file; at most
+# (LOG_FILE_BACKUP_COUNT + 1) * LOG_FILE_MAX_BYTES bytes are kept on disk.
+LOG_FILE_MAX_BYTES = 10 * 1024 * 1024
+LOG_FILE_BACKUP_COUNT = 3
 VEHICLE_UPDATES_KEY = "vehicle_updates"
 TRIP_UPDATES_KEY = "trip_updates"
 
