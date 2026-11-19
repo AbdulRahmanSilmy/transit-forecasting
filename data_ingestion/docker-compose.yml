@@ -1,5 +1,12 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   mysql:
+    logging: *default-logging
     image: mysql:8.0
     container_name: transit_mysql
     restart: unless-stopped
@@ -12,7 +19,10 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
       - "3307:3306"
-    command: --default-authentication-plugin=mysql_native_password
+    # Binary logs only serve replication/point-in-time recovery, which this
+    # single-node setup does not use; with MySQL's 30-day default they grew
+    # to several GB on the Raspberry Pi SD card.
+    command: --default-authentication-plugin=mysql_native_password --skip-log-bin
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -23,6 +33,7 @@ services:
       start_period: 20s
 
   phpmyadmin:
+    logging: *default-logging
     image: phpmyadmin/phpmyadmin
     container_name: phpmyadmin
     restart: unless-stopped
@@ -39,6 +50,7 @@ services:
         condition: service_healthy
 
   data_ingestion:
+    logging: *default-logging
     build: .
     container_name: data_ingestion
     restart: unless-stopped
@@ -51,6 +63,7 @@ services:
         condition: service_healthy
 
   integration_tests:
+    logging: *default-logging
     build: .
     profiles: ["test"]
     env_file:

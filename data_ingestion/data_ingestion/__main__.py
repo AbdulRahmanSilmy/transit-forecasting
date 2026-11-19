@@ -12,11 +12,14 @@ connection and data ingestion settings.
 import argparse
 import logging
 import threading
+from logging.handlers import RotatingFileHandler
 
 from .config import CONFIG_PATH, load_config
 from .constants import (
     CONNECTION_PARAMS_KEY,
     DATA_INGESTION_PARAMS_KEY,
+    LOG_FILE_BACKUP_COUNT,
+    LOG_FILE_MAX_BYTES,
     LOGGING_FILE_KEY,
     TRIP_UPDATES_KEY,
     VEHICLE_UPDATES_KEY,
@@ -54,7 +57,12 @@ def main(config_path: str = CONFIG_PATH):
         level=logging.INFO,  # Change to DEBUG for more detailed logs
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[
-            logging.FileHandler(logging_file),  # log to file
+            # Rotate so the long-running service cannot fill the disk.
+            RotatingFileHandler(
+                logging_file,
+                maxBytes=LOG_FILE_MAX_BYTES,
+                backupCount=LOG_FILE_BACKUP_COUNT,
+            ),
             logging.StreamHandler(),  # also print to console
         ],
     )
