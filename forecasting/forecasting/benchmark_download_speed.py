@@ -356,9 +356,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--route-id", default="97-KEL")
     parser.add_argument("--direction-id", type=int, choices=(0, 1), default=0)
-    parser.add_argument(
-        "--env-file", type=Path, default=Path(".env.road_segment_congestion")
-    )
+    parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument(
         "--output-dir",
         type=Path,

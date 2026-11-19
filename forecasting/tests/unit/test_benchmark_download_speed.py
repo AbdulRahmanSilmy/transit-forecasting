@@ -220,6 +220,6 @@ def test_main_loads_notebook_environment_file(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(benchmark, "_connection_parameters_from_env_file", load)
     monkeypatch.setattr(benchmark, "run_download_benchmark", run)
     benchmark.main(["--output-dir", str(tmp_path / "results"), "--repeats", "1"])
-    load.assert_called_once_with(Path(".env.road_segment_congestion"))
+    load.assert_called_once_with(Path(".env"))
     assert run.call_args.kwargs["hours"] == benchmark.DEFAULT_HOURS
     assert run.call_args.kwargs["repeats"] == 1

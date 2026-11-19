@@ -355,6 +355,7 @@ def test_get_dataset_reads_file_overrides_without_changing_environment(
     env_file.write_text(
         "# Database settings\n\nexport TRANSIT_DB_HOST='file.example.test'\n"
         "TRANSIT_DB_PASSWORD='two words'\n"
+        "R2_BUCKET=unrelated-setting\n"
     )
     original_environment = dict(os.environ)
 
@@ -374,7 +375,7 @@ def test_get_dataset_reads_file_overrides_without_changing_environment(
 @pytest.mark.parametrize(
     "content",
     [
-        "UNKNOWN=value",
+        "TRANSIT_DB_HOST",
         "TRANSIT_DB_HOST=two words",
         "TRANSIT_DB_HOST=",
         "TRANSIT_DB_HOST='unclosed",

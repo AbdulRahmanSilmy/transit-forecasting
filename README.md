@@ -122,7 +122,7 @@ dataset = get_backtest_dataset(
     "data",
     source="download",
     dataset_id="route97_direction0_week",
-    env_file=".env.road_segment_congestion",
+    env_file=".env",
     vehicle_query=vehicle_query,
     vehicle_query_params=vehicle_query_params,
     trip_query=trip_query,
@@ -163,7 +163,7 @@ Route `97-KEL`, direction `0`, both realtime tables, all columns, and
 conda run --no-capture-output -n transit_env python -m forecasting.benchmark_download_speed
 ```
 
-It reads the same ignored `.env.road_segment_congestion` file or existing
+It reads the same ignored `.env` file or existing
 `TRANSIT_DB_*` variables. Default windows are **1, 2, 4, 8, 12, 24, 48, 72, 96,
 120, 144, and 168 hours**, with three full downloads per window. The first
 sweep increases in size; subsequent sweeps use a reproducible shuffled order

@@ -266,7 +266,7 @@ def test_notebook_replays_named_historical_snapshot_without_credentials(
         root, _updates(), _updates(), static_dir, dataset_id="historical"
     )
     save_backtest_dataset(root, _updates().iloc[:1], _updates(), static_dir)
-    (tmp_path / ".env.road_segment_congestion").write_text("invalid credentials file\n")
+    (tmp_path / ".env").write_text("invalid credentials file\n")
     (tmp_path / "forecasting/forecasting").mkdir(parents=True)
     monkeypatch.chdir(tmp_path)
     namespace = _notebook_namespace(tmp_path)

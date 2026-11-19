@@ -75,6 +75,7 @@ def _connection_parameters_from_env_file(
     env_file : str or pathlib.Path or None
         Optional shell-style settings file. If absent, the downloader uses
         the existing environment. File values override environment values.
+        Variables other than ``TRANSIT_DB_*`` are ignored.
 
     Returns
     -------
@@ -84,7 +85,8 @@ def _connection_parameters_from_env_file(
     Raises
     ------
     ValueError
-        If an existing file contains an unknown variable or malformed value.
+        If an existing file contains a line without ``=`` or a malformed
+        ``TRANSIT_DB_*`` value.
     """
     if env_file is None or not Path(env_file).is_file():
         return None
@@ -99,10 +101,13 @@ def _connection_parameters_from_env_file(
         if line.startswith("export "):
             line = line.removeprefix("export ").strip()
         variable, separator, encoded_value = line.partition("=")
-        if not separator or variable not in values:
+        if not separator:
             raise ValueError(
                 f"Invalid environment setting on line {line_number} of {path}."
             )
+        if variable not in values:
+            # Shared project .env files also hold unrelated settings (e.g. R2).
+            continue
         parsed_value = shlex.split(encoded_value, posix=True)
         if len(parsed_value) != 1:
             raise ValueError(f"Invalid value on line {line_number} of {path}.")
