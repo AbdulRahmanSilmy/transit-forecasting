@@ -426,6 +426,65 @@ def _earliest_day(settings: ArchiveSettings) -> date:
     return earliest.date()
 
 
+def run_export(
+    settings: ArchiveSettings,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+    tables: Iterable[str] | None = None,
+    overwrite: bool = False,
+) -> dict[str, list[DayExport]]:
+    """Archive every complete UTC day in ``[start, end)`` of several tables.
+
+    Parameters
+    ----------
+    settings : ArchiveSettings
+        Source and destination settings.
+    start : datetime.date or None, optional
+        First UTC day; defaults to the earliest day in MySQL.
+    end : datetime.date or None, optional
+        Exclusive last UTC day; defaults to, and may not exceed, today (UTC).
+    tables : collections.abc.Iterable[str] or None, optional
+        Archive table names; defaults to all of ``ARCHIVE_TABLES``.
+    overwrite : bool, optional
+        Re-export days that already have an archive file.
+
+    Returns
+    -------
+    dict[str, list[DayExport]]
+        Exported days per table; days already archived are omitted.
+
+    Raises
+    ------
+    ValueError
+        If ``end`` is later than today (UTC).
+    """
+    today = datetime.now(timezone.utc).date()
+    end = today if end is None else end
+    if end > today:
+        raise ValueError("end cannot be later than today (UTC); days must be complete.")
+    start = start or _earliest_day(settings)
+    days = day_range(start, end)
+    tables = sorted(tables or ARCHIVE_TABLES)
+    logger.info("Archiving %s for %d days: %s to %s", tables, len(days), start, end)
+    results: dict[str, list[DayExport]] = {}
+    with ThreadPoolExecutor(max_workers=len(tables)) as pool:
+        futures = {
+            pool.submit(export_days, settings, table, days, overwrite=overwrite): table
+            for table in tables
+        }
+        for future in as_completed(futures):
+            table = futures[future]
+            results[table] = future.result()
+            logger.info(
+                "%s: %d days, %d rows archived",
+                table,
+                len(results[table]),
+                sum(result.rows for result in results[table]),
+            )
+    return results
+
+
 def main(argv: list[str] | None = None) -> None:
     """Archive complete UTC days of the realtime tables to R2.
 
@@ -463,28 +522,13 @@ def main(argv: list[str] | None = None) -> None:
     )
     if args.end > today:
         parser.error("--end cannot be later than today (UTC); days must be complete.")
-    settings = load_archive_settings(args.env_file)
-    start = args.start or _earliest_day(settings)
-    days = day_range(start, args.end)
-    tables = args.table or sorted(ARCHIVE_TABLES)
-    logger.info(
-        "Archiving %s for %d days: %s to %s", tables, len(days), start, args.end
+    run_export(
+        load_archive_settings(args.env_file),
+        start=args.start,
+        end=args.end,
+        tables=args.table,
+        overwrite=args.overwrite,
     )
-    with ThreadPoolExecutor(max_workers=len(tables)) as pool:
-        futures = {
-            pool.submit(
-                export_days, settings, table, days, overwrite=args.overwrite
-            ): table
-            for table in tables
-        }
-        for future in as_completed(futures):
-            results = future.result()
-            logger.info(
-                "%s: %d days, %d rows archived",
-                futures[future],
-                len(results),
-                sum(result.rows for result in results),
-            )
 
 
 if __name__ == "__main__":
