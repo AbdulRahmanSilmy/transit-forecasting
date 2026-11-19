@@ -66,7 +66,7 @@ python -m data_ingestion.archive --start 2026-11-01 --end 2026-11-08 --table tri
 Settings come from `--env-file` and the environment: MySQL as `TRANSIT_DB_*` (laptop) or `MYSQL_*` (the Docker `.env`), plus `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`. `--end` is exclusive and cannot be later than today (UTC), so the current partial day is never archived.
 
 ### Nightly Export And MySQL Retention
-The `archive` Compose service runs `python -m data_ingestion.nightly`: at start-up and then every night at `ARCHIVE_RUN_AT_UTC` (default `00:30`) it archives every complete UTC day not yet in R2, so a missed night catches up on the next run. Failures are logged to the container logs (`docker compose logs archive`) and retried after an hour.
+The `archive` Compose service runs `python -m data_ingestion.nightly`: at start-up and then every night at `ARCHIVE_RUN_AT_UTC` (default `10:00`, when the feed is quietest: 2–3 a.m. in Kelowna) it archives every complete UTC day not yet in R2, so a missed night catches up on the next run. Failures are logged to the container logs (`docker compose logs archive`) and retried after an hour.
 
 Set these in `data_ingestion/.env` (never commit it):
 

@@ -62,7 +62,7 @@ services:
       mysql:
         condition: service_healthy
 
-  # Exports each complete UTC day to Cloudflare R2 shortly after midnight UTC
+  # Exports each complete UTC day to Cloudflare R2 at 10:00 UTC, the feed's quietest time
   # and, when ARCHIVE_RETAIN_DAYS is set, deletes verified older days from
   # MySQL. Needs the R2_* settings in .env.
   archive:

@@ -7,7 +7,7 @@ The format is based on Keep a Changelog and this project uses Semantic Versionin
 ## [0.4.0] - 2026-11-19
 
 ### Added
-- Added `python -m data_ingestion.nightly` and the `archive` Compose service, which export each complete UTC day to R2 shortly after midnight UTC, catch up missed days, and retry failed runs.
+- Added `python -m data_ingestion.nightly` and the `archive` Compose service, which export each complete UTC day to R2 daily at 10:00 UTC (the feed's quietest time), catch up missed days, and retry failed runs.
 - Added `python -m data_ingestion.retention` with `check`, `prune`, `compact`, and `drop-backup`. Days are removed from MySQL only when their R2 file exists and its row count matches; `compact` rebuilds the tables with only the retention window via `RENAME TABLE` and keeps a backup until `drop-backup --yes`.
 - Added `ARCHIVE_RETAIN_DAYS` to enable nightly pruning and `ARCHIVE_RUN_AT_UTC` to set the run time.
 - Added an `EXTRAS` build argument to the Dockerfile for optional dependency groups.

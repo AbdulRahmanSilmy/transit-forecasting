@@ -9,7 +9,7 @@ Run as a long-lived service (the ``archive`` Compose service) with
    window whose R2 copies are verified (see :mod:`data_ingestion.retention`).
 
 A run happens at start-up and then daily at ``ARCHIVE_RUN_AT_UTC``
-(``HH:MM``, default ``00:30``). A failed run is logged and retried after
+(``HH:MM``, default ``10:00``, the feed's quietest time). A failed run is logged and retried after
 ``RETRY_DELAY``.
 """
 
@@ -27,7 +27,11 @@ from . import archive, retention
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_RUN_AT_UTC = "00:30"
+# The quietest time of the feed: Aug-Nov 2026 averaged under 100 trip rows
+# and 40 vehicle rows per half hour from 10:00 to 10:30 UTC (2-3 a.m. in
+# Kelowna), against up to 77,000 and 5,400 at peak, so the export and prune
+# compete least with ingestion for the Pi's CPU, disk, and network.
+DEFAULT_RUN_AT_UTC = "10:00"
 RETRY_DELAY = timedelta(hours=1)
 
 
