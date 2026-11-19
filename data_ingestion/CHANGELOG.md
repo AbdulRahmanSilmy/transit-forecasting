@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and this project uses Semantic Versioning.
 
+## [0.3.0] - 2026-11-18
+
+### Added
+- Added `python -m data_ingestion.archive`, which copies complete UTC days of the realtime tables to Cloudflare R2 as zstd Parquet files (`archive/<table>/date=YYYY-MM-DD/data.parquet`), sorted by route and direction, and verifies each upload's row count.
+- Added the optional `archive` dependency group (`duckdb`).
+
 ## [0.2.1] - 2026-11-17
 
 ### Fixed
