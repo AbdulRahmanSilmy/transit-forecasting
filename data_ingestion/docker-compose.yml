@@ -62,6 +62,27 @@ services:
       mysql:
         condition: service_healthy
 
+  # Exports each complete UTC day to Cloudflare R2 at 10:00 UTC, the feed's quietest time
+  # and, when ARCHIVE_RETAIN_DAYS is set, deletes verified older days from
+  # MySQL. Needs the R2_* settings in .env.
+  archive:
+    logging: *default-logging
+    build:
+      context: .
+      args:
+        EXTRAS: archive
+    container_name: transit_archive
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    volumes:
+      # DuckDB downloads its mysql and httpfs extensions here once.
+      - duckdb_extensions:/root/.duckdb
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ["python", "-m", "data_ingestion.nightly"]
+
   integration_tests:
     logging: *default-logging
     build: .
@@ -77,7 +98,8 @@ services:
         condition: service_healthy
     command: >
       sh -c "pip install --no-cache-dir .[test] &&
-      pytest tests/integration/test_mysql_ingestion.py -q"
+      pytest tests/integration -q"
 
 volumes:
   mysql_data:
+  duckdb_extensions:
