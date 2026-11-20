@@ -75,7 +75,7 @@ On the locked test set, the candidate's paired MAE difference vs B0 has a day-cl
 - [x] Scope: **direction 0 only**. Direction 1 is out of scope for this study.
 - [x] Minimum effect size: **5% relative MAE reduction** vs B0 (revisable before the test is unlocked).
 - [x] Stale final reports (> 10 min before the reported arrival) are excluded from truth (2026-11-19, interim; see issue #12).
-- [ ] Untracked journeys (every final delay exactly 0 s, e.g. all of 2026-11-01): exclude?
+- [ ] Untracked journeys (every final delay exactly 0 s, e.g. all of 2026-11-01): exclude? (#21)
 - [x] Clock handling (2026-11-19, owner-directed fix after investigation, [issue #13](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/13)):
   - Since Transit BC's restart after the 2026-11-01/02 outage, the feed labels vehicles with trips whose public timetable is **1 h later** than their movements.
   - Event times are physical: the header clock matches real time, and vehicle GPS is at the stop at the reported arrival time. So they are **never shifted**, and final reports remain valid truth.
@@ -83,6 +83,8 @@ On the locked test set, the candidate's paired MAE difference vs B0 has a day-cl
   - Journeys with non-whole-hour offsets are excluded (`schedule_clock_mismatch`).
 
 ## Backlog (agent proposes, owner prioritises)
+
+Open items are tracked as GitHub issues: H6 #14, H7 #15, H2 #16, H4 #17, H3 #18, H5 #19. Locked test: #20. Data-truth work: #12 (position-based arrivals), #21 (untracked journeys).
 
 | ID | Hypothesis | Cheapest test | Status |
 |---|---|---|---|
