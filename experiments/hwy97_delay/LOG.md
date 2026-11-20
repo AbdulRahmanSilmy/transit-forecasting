@@ -10,7 +10,8 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 |---|---|---|---|---|---|---|---|---|
 | E000 | 2026-11-19 | 56c993e | prior evidence | Segment 4 notebook, not run under the harness | see below | n/a | n/a | context |
 | E001 | 2026-11-20 | bb769cf | H0 | dev: harmonic_huber (7741d709320c49ae9da47ce907853ecd) | 139.0 (B0 166.2) | -27.2 [-36.0, -18.6] (-16.4%) | -4.2 vs B3_calendar_median | provisional baseline |
-| E002 | 2026-11-20 | 64f51eb | H1 | dev: harmonic_huber (f38bff5b31864f3497745333592f9ee2) | 134.4 (B0 166.1) | -31.7 [-38.8, -24.7] (-19.1%) | -2.6 vs B3_calendar_median | H1 confirmed; new baseline |
+| E002 | 2026-11-20 | 64f51eb | H1 | dev: harmonic_huber (f38bff5b31864f3497745333592f9ee2) | 134.4 (B0 166.1) | -31.7 [-38.8, -24.7] (-19.1%) | -2.6 vs B3_calendar_median | H1 confirmed; superseded by E003 |
+| E003 | 2026-11-20 | 5d9cfa5 | H1 | dev: harmonic_huber (98ca4b712d70439eaf1fde2a555d32fe) | 134.5 (B0 166.2) | -31.7 [-38.8, -24.7] (-19.1%) | -2.5 vs B3_calendar_median | keep; current baseline |
 
 ## Entries
 
@@ -62,6 +63,29 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Sanity checks: all months agree ≥ 98.5% with start descriptors; leakage assertions passed; identical rows; shuffled control 239.2 ≥ 0.99 × B2 (passed).
 - Verdict: **H1 confirmed (keep).** The peak shift came from the timestamp defect. With correct clocks the calendar models beat B0 in every fold, including Nov 2–8. This is the new baseline. Caveat: harmonic beats B3 by only 2.6 s and loses to it in dev4 and dev6, so the evidence for the harmonic form over a plain calendar lookup is weak.
 - Next: H2 (history back to January; check that months' schedule-clock agreement first), and H6 (first-stop departure delay; every method is still biased 55–140 s early).
+
+### E003: proper clock fix, timetable calendar clock (H1)
+
+- Hypothesis: H1 follow-up. The E002 gain comes from keying calendar features to the trip's timetable, not from moving event times.
+- Prediction before running: the same MAE as E002 (within about 1 s), with no visits lost to clock exclusions.
+- Investigation (issue #13, root cause):
+  - Transit BC's feed, not our storage. The R2 archive matches the direct MySQL download row for row.
+  - The live feed shows the same −60 min offset between its schedules and both the start descriptor and the static GTFS.
+  - The header clock matches real time (checked against Google's and tmix's HTTP `Date` headers).
+  - Vehicle GPS is at the stop at the reported arrival time (median 52 m, 95% within 300 m, same as before Nov 2).
+  - So event times are physical, and the **trip labels** point to the timetable an hour later.
+  - Summer 2026 samples show offset 0.
+  - The archive has no data from Feb to May 2026; route-tagged data starts around June/July.
+  - Note: two live-feed checks on 2026-11-19 fall inside the locked-test period. They were used only for clock relationships: nothing was fitted, scored or plotted, and one bus's delay value was printed.
+- Change: 5d9cfa5. `forecasting/feed_clock.py` measures each journey's whole-hour offset to its descriptor. Event times are never shifted. Service days and the models' `scheduled_departure` use the timetable clock (`calendar_clock: "timetable"`). Journeys with non-whole-hour offsets are excluded (48, all in September). This replaces E002's window shift, which also moved `feed_timestamp`.
+- Git: 5d9cfa5   MLflow run: 98ca4b712d70439eaf1fde2a555d32fe
+- Results (dev, 27,759 visits, the same rows as E001):
+  - MAE: B0 166.2 s, B2 240.5, B3 137.0, **harmonic 134.5**.
+  - Harmonic vs B0: −31.7 s [−38.8, −24.7], −19.1%, win rate 0.63.
+  - dev6: harmonic 119.6, B3 118.2, B0 141.7.
+- Sanity checks: monthly offsets are Sep 98.9% / Oct 99.9% at 0, and Nov 92.7% at +60, 7.3% at 0 (Nov 1 and early Nov 2). Leakage assertions passed; shuffled control passed.
+- Verdict: **keep. This is the current baseline.** It confirms the clock interpretation. Harmonic vs B3 is still only −2.5 s overall, and harmonic loses to B3 in dev4 and dev6.
+- Next: H6 (first-stop departure delay; bias −55 to −140 s), and H2 with the realistic history (about June/July onwards).
 
 <!-- Template for new entries:
 

@@ -88,7 +88,7 @@ On the locked test set, the candidate's paired MAE difference vs B0 has a day-cl
 |---|---|---|---|
 | H0 | Build the harness and baseline ladder (B0 to B3) | Iteration 0: implement and reproduce B0 | done (E001) |
 | H1 | **Priority.** The morning traffic peak shifted after Nov 1, coinciding with the DST change (Sun **2026-11-01**), and this caused the harmonic model's worse holdout performance. Either a timezone bug (1-hour **phase** shift in features or clocks) or a genuine change in timing/level | Compare fitted vs observed morning-peak timing and height by week around Nov 1; audit every tz conversion | **confirmed (E002):** a timestamp defect (issue #13), not traffic. After correction, dev6 harmonic MAE 144→119 s |
-| H2 | Ten months of history (vs two) gives more stable recurring patterns than the 2-month window | Same model, training start Jan vs Sep | open |
+| H2 | Longer history (vs two months) gives more stable recurring patterns than the 2-month window. **Archive check (E003 notes):** Feb–May 2026 is empty and route-tagged data starts around June/July, so this means about 4–5 months, not 10 | Same model, training start ~July vs Sep | open |
 | H3 | A recent-level term (e.g. trailing 2-week median offset) fixes the level shift without chasing anomalies | Harmonic + rolling level vs harmonic | open |
 | H4 | A pooled model across segments (segment effects + shared calendar) beats per-segment models | Pooled vs per-segment harmonic | open |
 | H5 | Dwell median vs zero changes the conclusion | Ablation | open |
