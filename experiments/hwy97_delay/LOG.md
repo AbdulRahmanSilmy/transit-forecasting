@@ -12,6 +12,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 | E001 | 2026-11-20 | bb769cf | H0 | dev: harmonic_huber (7741d709320c49ae9da47ce907853ecd) | 139.0 (B0 166.2) | -27.2 [-36.0, -18.6] (-16.4%) | -4.2 vs B3_calendar_median | provisional baseline |
 | E002 | 2026-11-20 | 64f51eb | H1 | dev: harmonic_huber (f38bff5b31864f3497745333592f9ee2) | 134.4 (B0 166.1) | -31.7 [-38.8, -24.7] (-19.1%) | -2.6 vs B3_calendar_median | H1 confirmed; superseded by E003 |
 | E003 | 2026-11-20 | 5d9cfa5 | H1 | dev: harmonic_huber (98ca4b712d70439eaf1fde2a555d32fe) | 134.5 (B0 166.2) | -31.7 [-38.8, -24.7] (-19.1%) | -2.5 vs B3_calendar_median | keep; current baseline |
+| E004 | 2026-11-20 | 1fe6300 | H0 | dev: harmonic_huber + traversal diagnostics (a9a38c98ebe3421e8d0f8562c594fef5) | 134.5 (B0 166.2) | -31.7 [-38.8, -24.7] (-19.1%) | -2.5 vs B3_calendar_median | diagnostic; see H7 |
 
 ## Entries
 
@@ -86,6 +87,20 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Sanity checks: monthly offsets are Sep 98.9% / Oct 99.9% at 0, and Nov 92.7% at +60, 7.3% at 0 (Nov 1 and early Nov 2). Leakage assertions passed; shuffled control passed.
 - Verdict: **keep. This is the current baseline.** It confirms the clock interpretation. Harmonic vs B3 is still only −2.5 s overall, and harmonic loses to B3 in dev4 and dev6.
 - Next: H6 (first-stop departure delay; bias −55 to −140 s), and H2 with the realistic history (about June/July onwards).
+
+### E004: per-segment traversal and dwell diagnostics
+
+- Hypothesis: diagnostic (owner request). Is traversal predicted well even where delay is not? The owner expected segment 14's traversal to look better than its delay.
+- Change: 1fe6300. The harness now scores traversal and dwell per method and segment, logs them to MLflow (`traversal_*`, `dwell_*`, `traversal_segment_MAE_s/*`) and saves `traversals.csv.gz`. New figures: a segment-vs-stop error overview, plus a 3-row time series (traversal, upstream dwell, downstream delay) and a predicted-vs-observed traversal scatter for each segment. Transit BC's implied traversal and dwell are its timetable run time and scheduled dwell. The predictions are identical to E003. The run is marked DIRTY only because of an unrelated, uncommitted owner edit to `notebooks/dynamics_model.ipynb`.
+- Git: 1fe6300   MLflow run: a9a38c98ebe3421e8d0f8562c594fef5
+- Results (dev, 26,811 traversals, holidays excluded):
+  - **Traversal MAE:** B0 timetable 65.1 s (bias +18.8), B2 42.3, B3 35.5, **harmonic 33.7** (bias −1.2), shuffled control 42.6.
+  - **Dwell:** scheduled (B0) 24.9 s MAE (bias −23.1); stop median 15.0 s (bias −4.0).
+  - **By segment:** harmonic ranges 22.5 s (seq 4) to 67.2 s (seq 6, 103745→102853, the notebook's "segment 4"). Seq 14 is 25.3 s vs 62.5 s for B0; seq 2 is 35.1 s.
+  - **Delay MAE by stop** grows from about 1.2 min (stop 2) to 3.3 min (stop 14). At stops 13–14, B0 (3.2 min) matches our methods, even though our traversal errors are half of B0's.
+- Interpretation: **the owner's expectation holds.** Segment 14's traversal is predicted well (0.42 min). Its delay looks worse because the delay at stop 14 accumulates the errors of 13 chained segments, plus the anchor error. The accumulation, and B0 catching up at the end, suggest errors that are correlated within a journey and/or schedule recovery (buses holding at timepoints), which a plain sum of traversals ignores.
+- Verdict: diagnostic only; no change to the baseline.
+- Next: H6 (anchor departure delay), and H7 (recovery-aware chaining).
 
 <!-- Template for new entries:
 

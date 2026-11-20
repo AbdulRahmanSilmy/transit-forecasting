@@ -92,6 +92,7 @@ On the locked test set, the candidate's paired MAE difference vs B0 has a day-cl
 | H3 | A recent-level term (e.g. trailing 2-week median offset) fixes the level shift without chasing anomalies | Harmonic + rolling level vs harmonic | open |
 | H4 | A pooled model across segments (segment effects + shared calendar) beats per-segment models | Pooled vs per-segment harmonic | open |
 | H5 | Dwell median vs zero changes the conclusion | Ablation | open |
+| H7 | Chained delay error grows along the route, so by stops 13–14 our methods only match B0 despite traversal errors half of B0's (E004). Buses ahead of schedule hold at timepoints, so delay recovers toward the timetable. A recovery-aware chain (e.g. early arrivals clipped to the schedule at timepoints, or learned per-segment recovery) beats the plain sum | Clip predicted delay at timepoint stops to ≥ 0 (or learn a recovery fraction) and compare delay MAE by stop with E004 | open (proposed by agent) |
 | H6 | Departure delay at the first stop has a recurring pattern. All methods are biased early (−53 to −138 s, E001) because the anchor is Transit BC's 0-delay origin estimate | Learn a calendar median of first-stop departure delay as the anchor | open (proposed by agent) |
 
 ## Findings
