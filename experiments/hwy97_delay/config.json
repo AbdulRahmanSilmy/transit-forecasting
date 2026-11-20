@@ -32,13 +32,6 @@
   "seed": 42,
   "min_relative_improvement": 0.05,
   "max_final_report_age_minutes": 10,
-  "timestamp_shifts": [
-    {
-      "from_stored": "2026-11-02 08:00:00",
-      "to_stored": null,
-      "add_hours": 1,
-      "note": "Temporary: rows written after the 2026-11-02 ingestion restart are 1 h early (GitHub issue #13)."
-    }
-  ],
-  "min_schedule_clock_agreement": 0.95
+  "calendar_clock": "timetable",
+  "max_clock_mismatch_share": 0.05
 }

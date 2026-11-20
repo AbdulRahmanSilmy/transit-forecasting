@@ -76,7 +76,11 @@ On the locked test set, the candidate's paired MAE difference vs B0 has a day-cl
 - [x] Minimum effect size: **5% relative MAE reduction** vs B0 (revisable before the test is unlocked).
 - [x] Stale final reports (> 10 min before the reported arrival) are excluded from truth (2026-11-19, interim; see issue #12).
 - [ ] Untracked journeys (every final delay exactly 0 s, e.g. all of 2026-11-01): exclude?
-- [x] Timestamp correction (2026-11-19, interim): stored times are 1 h early for rows written since the 2026-11-02 ingestion restart (not the DST change itself). The harness adds the hour back (`timestamp_shifts` in config.json), excludes journeys whose scheduled departure disagrees with their start descriptor (`schedule_clock_mismatch`), and stops if any month's agreement is below 95%. Root cause: [issue #13](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/13), investigated on a separate branch.
+- [x] Clock handling (2026-11-19, owner-directed fix after investigation, [issue #13](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/13)):
+  - Since Transit BC's restart after the 2026-11-01/02 outage, the feed labels vehicles with trips whose public timetable is **1 h later** than their movements.
+  - Event times are physical: the header clock matches real time, and vehicle GPS is at the stop at the reported arrival time. So they are **never shifted**, and final reports remain valid truth.
+  - Service days and calendar features use the **timetable clock** (feed schedule plus the journey's whole-hour offset to its start descriptor; `calendar_clock` in config.json), because recurring behaviour is keyed to the trip.
+  - Journeys with non-whole-hour offsets are excluded (`schedule_clock_mismatch`).
 
 ## Backlog (agent proposes, owner prioritises)
 

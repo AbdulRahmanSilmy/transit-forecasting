@@ -90,9 +90,10 @@ def flatten_metrics(metrics: Mapping[str, Any]) -> dict[str, float]:
     clock = metrics.get("schedule_clock")
     if clock is not None:
         for record in clock.to_dict("records"):
-            flat[_key("schedule_clock_agreement", record["service_month"])] = record[
-                "agreement"
-            ]
+            for column in ("share_offset_60", "share_mismatch"):
+                flat[_key("timetable", column, record["service_month"])] = record[
+                    column
+                ]
     for section in ("control", "criterion"):
         for name, value in (metrics.get(section) or {}).items():
             flat[_key(section, name)] = float(value)

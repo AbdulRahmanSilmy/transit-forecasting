@@ -34,6 +34,7 @@ from .delay_propagation_display import (
     make_propagation_heatmap,
     make_time_space_diagram,
 )
+from .feed_clock import journey_timetable_offsets, timetable_offset_summary
 from .harmonic_regression import (
     CalendarHarmonics,
     HuberLassoRegressor,
@@ -97,7 +98,6 @@ from .stop_dynamics_model import (
     evaluate_stop_dynamics_identity,
     fit_stop_dynamics_model,
 )
-from .timestamp_correction import correct_timestamp_shifts, schedule_clock_agreement
 from .traversal_models import (
     CalendarMedianTraversal,
     HarmonicTraversal,
@@ -118,8 +118,8 @@ from .trip_updates import (
 )
 
 __all__ = [
-    "correct_timestamp_shifts",
-    "schedule_clock_agreement",
+    "journey_timetable_offsets",
+    "timetable_offset_summary",
     "OriginVisits",
     "StudyConfig",
     "StudyRun",

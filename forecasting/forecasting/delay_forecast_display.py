@@ -279,7 +279,12 @@ def make_hourly_error_figure(
         (positive means the method predicted later than observed).
     """
     rows = _common(predictions, methods)
-    hour = rows["scheduled_arrival"].dt.tz_convert(timezone).dt.hour
+    clock = (
+        rows["calendar_arrival"]
+        if "calendar_arrival" in rows
+        else rows["scheduled_arrival"]
+    )
+    hour = clock.dt.tz_convert(timezone).dt.hour
     figure = make_subplots(
         rows=2,
         cols=1,
