@@ -12,6 +12,15 @@ from .delay_congestion_display import (
     make_delay_congestion_map,
     prepare_delay_congestion_snapshots,
 )
+from .delay_forecast_eval import (
+    OriginVisits,
+    StudyConfig,
+    StudyRun,
+    chain_delay_forecast,
+    prepare_origin_visits,
+    run_study,
+    score_predictions,
+)
 from .delay_propagation import (
     compute_delay_anomalies,
     event_space_time_response,
@@ -88,6 +97,13 @@ from .stop_dynamics_model import (
     evaluate_stop_dynamics_identity,
     fit_stop_dynamics_model,
 )
+from .traversal_models import (
+    CalendarMedianTraversal,
+    HarmonicTraversal,
+    SegmentMedianTraversal,
+    ShuffledTargetTraversal,
+    make_traversal_model,
+)
 from .trip_dynamics_display import make_trip_dynamics_figure
 from .trip_dynamics_eda import (
     TripDynamicsEDA,
@@ -101,6 +117,18 @@ from .trip_updates import (
 )
 
 __all__ = [
+    "OriginVisits",
+    "StudyConfig",
+    "StudyRun",
+    "chain_delay_forecast",
+    "prepare_origin_visits",
+    "run_study",
+    "score_predictions",
+    "CalendarMedianTraversal",
+    "HarmonicTraversal",
+    "SegmentMedianTraversal",
+    "ShuffledTargetTraversal",
+    "make_traversal_model",
     "BacktestDataset",
     "CalendarHarmonics",
     "CongestionResult",

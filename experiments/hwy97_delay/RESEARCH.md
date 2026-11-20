@@ -19,7 +19,7 @@ Scope: repeated patterns only. Anomalous delays (incidents, detours) stay in the
 |---|---|
 | Prediction unit | One stop visit `(trip_instance_key, stop_sequence)` on a direction-0 journey |
 | Origin `t0` | The journey's **first** trip-update publication. `lead = final arrival_time - t0` is recorded for every row |
-| Truth | Final reported `arrival_delay` (latest publication). This is a feed proxy, not an independent measurement |
+| Truth | Final reported `arrival_delay` (latest publication). This is a feed proxy, not an independent measurement. If that report was published **more than 10 min before the arrival it reports**, it is an un-updated prediction: the visit is excluded as `stale_final_report` (≈3% of visits; also applied to both ends of training traversals). Approved by owner 2026-11-19 as an interim rule; a position-based truth is tracked in [issue #12](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/12) |
 | Comparator B0 (Transit BC) | `arrival_delay` for that stop in the latest publication at or before `t0` |
 | Scheduled allowance `S_k` | From origin-time feed fields only: `(A - D)` at `t0` for both endpoints. Never the latest publication |
 | Traversal `T_k` | Upstream departure to downstream arrival (excludes upstream dwell), as in the harmonic notebook |
@@ -74,6 +74,9 @@ On the locked test set, the candidate's paired MAE difference vs B0 has a day-cl
 - [x] Origin: **earliest publication per journey**.
 - [x] Scope: **direction 0 only**. Direction 1 is out of scope for this study.
 - [x] Minimum effect size: **5% relative MAE reduction** vs B0 (revisable before the test is unlocked).
+- [x] Stale final reports (> 10 min before the reported arrival) are excluded from truth (2026-11-19, interim; see issue #12).
+- [ ] Untracked journeys (every final delay exactly 0 s, e.g. all of 2026-11-01): exclude?
+- [ ] Timestamp correction: stored times are 1 h early during standard time (after 2026-11-01, and before 2026-03-08). Correct in the loader, fix at the source, or both?
 
 ## Backlog (agent proposes, owner prioritises)
 

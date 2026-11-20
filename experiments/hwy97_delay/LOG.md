@@ -1,6 +1,6 @@
 # Experiment log: Hwy 97 delay forecasting
 
-Append-only. One entry per run, including failed and negative results. Each entry must be reproducible from its git hash and run directory (`data/experiments/hwy97_delay/<run_id>/`, gitignored).
+Append-only. One entry per run, including failed and negative results. Each entry must be reproducible from its git hash, and cites its **MLflow run ID** (local store `data/mlflow/`, experiment `hwy97_delay`; see HARNESS.md). MLflow holds the numbers, figures and predictions. This log holds the reasoning.
 
 Scores are **development folds only** unless the entry is marked `LOCKED TEST` (owner-approved, at most once per candidate).
 
@@ -30,7 +30,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Hypothesis: H?
 - Prediction before running: <expected direction and size>
 - Change: <what code/config changed>
-- Git: <hash>   Run dir: <run_id>
+- Git: <hash>   MLflow run: <run_id>
 - Results (dev folds): MAE per method; Δ vs B0 with CI; Δ vs best baseline; per-fold spread
 - Sanity checks: leakage assertions passed? shuffled control? identical row counts?
 - Verdict: keep / discard / refine / inconclusive

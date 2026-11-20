@@ -605,7 +605,8 @@ def prepare_stop_congestion_analysis(
     joined["target_bus_contributed"] = [
         (
             instance in members
-            if isinstance(members, tuple) and pd.notna(instance)
+            # pyarrow-backed pandas may return the aggregated tuples as lists/arrays.
+            if isinstance(members, (tuple, list, np.ndarray)) and pd.notna(instance)
             else False
         )
         for instance, members in zip(joined["_instance"], joined["probe_instances"])

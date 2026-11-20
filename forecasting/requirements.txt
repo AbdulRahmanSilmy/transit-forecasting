@@ -4,3 +4,4 @@ ipywidgets
 jupyter
 plotly
 tqdm
+mlflow>=3

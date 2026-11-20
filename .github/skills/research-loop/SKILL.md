@@ -18,9 +18,9 @@ Read all three before starting.
 1. **Pick** the highest-priority `open` backlog item, or the one the owner named. Restate it as a falsifiable claim.
 2. **Predict** the expected direction and rough size of the effect, and write it in the new LOG entry *before* running.
 3. **Implement** the smallest change that tests it, in the package (`forecasting/forecasting/`). Add NumPy docstrings and focused unit tests. Follow `forecasting-development`.
-4. **Run** `conda run -n transit_env pytest forecasting/tests/unit -q`, then the harness on `--split dev`. Commit before the scored run so the log's git hash reproduces it.
+4. **Run** `conda run -n transit_env pytest forecasting/tests/unit -q`, then the harness on `--split dev --hypothesis H? --log-id E0NN`. Commit before the scored run so the log's git hash reproduces it. The run is logged to the local MLflow store (see HARNESS.md).
 5. **Check** the sanity outputs: leakage assertions, identical row counts, shuffled control. If any fail, stop and report. Do not interpret the scores.
-6. **Record** the LOG entry: results for every baseline, Δ vs B0 with CI, Δ vs best baseline, per-fold spread and verdict. Update the backlog status, and add new hypotheses the result suggests.
+6. **Record** the LOG entry, citing the MLflow run ID: results for every baseline, Δ vs B0 with CI, Δ vs best baseline, per-fold spread and verdict. Update the backlog status, and add new hypotheses the result suggests.
 7. **Decide**: keep / discard / refine / inconclusive. A Δ whose CI spans zero, or that is smaller than the fold-to-fold spread, is **inconclusive**, not a win.
 
 ## Hard rules

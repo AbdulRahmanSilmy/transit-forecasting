@@ -4,9 +4,10 @@ The harness is the loop's verifier. Once the owner has approved it, it is **prot
 
 - `forecasting/forecasting/delay_forecast_eval.py`: data preparation, splits, chaining, scoring
 - `experiments/hwy97_delay/evaluate.py`: CLI entry point
-- `experiments/hwy97_delay/config.toml`: dataset window, fold dates, locked-test dates, holidays
+- `experiments/hwy97_delay/config.json`: dataset window, fold dates, locked-test dates, holidays, stale-report threshold
+- `forecasting/forecasting/delay_forecast_display.py`: standard run figures
 
-Candidate models live in `forecasting/forecasting/traversal_models.py` (or similar), and agents change them freely.
+Candidate models live in `forecasting/forecasting/traversal_models.py`, and agents change them freely (register new names in `make_traversal_model`).
 
 ## CLI
 
@@ -15,12 +16,32 @@ conda run -n transit_env python experiments/hwy97_delay/evaluate.py --model harm
 conda run -n transit_env python experiments/hwy97_delay/evaluate.py --model harmonic_huber --split test --i-have-owner-approval
 ```
 
-Without the approval flag, `--split test` refuses to run. Every run writes `data/experiments/hwy97_delay/<UTC timestamp>_<model>/` containing:
+Without the approval flag, `--split test` refuses to run. Pass `--hypothesis H1 --log-id E002` to tag the run and pre-fill its LOG row.
+
+## Run tracking (MLflow)
+
+Every run is logged to a local MLflow store (`data/mlflow/`, gitignored: SQLite `mlflow.db` plus `artifacts/`) as one run in the `hwy97_delay` experiment:
+
+- **tags:** git hash, dirty flag, split, model, hypothesis, LOG ID, locked-test flag
+- **params:** model, split and the flattened study config
+- **metrics:** MAE/MedAE/RMSE/bias per method, Δ vs B0 with CI, win rate, and MAE per fold, period, stop and lead bin, plus control and criterion flags (0/1)
+- **artifacts:** the files listed below
+
+Browse runs with:
+
+```
+conda run -n transit_env mlflow ui --backend-store-uri sqlite:///data/mlflow/mlflow.db
+```
+
+(from the repo root, then open http://127.0.0.1:5000). MLflow is the run store. **LOG.md stays the narrative** (hypothesis, prediction before running, verdict) and cites the MLflow run ID. `--tracking files` writes the same files to `data/experiments/hwy97_delay/<UTC timestamp>_<model>_<split>/` instead, with offline figures.
+
+Artifacts per run:
 
 - `config.json`: CLI args, config, git hash, dirty flag, dataset checksums
-- `predictions.parquet`: one row per scored visit with truth, B0 to B3 and candidate predictions, lead, fold, stop
+- `predictions.csv.gz`: one row per scored visit with truth, B0 to B3 and candidate predictions, lead, fold, stop
 - `metrics.json` and a printed table: primary/secondary metrics, paired Δ vs B0 with a day-bootstrap CI, per fold
 - `audit.csv`: rows excluded at each stage, and why
+- `figures/`: daily MAE and mean delay, error by hour of day, predicted-vs-observed scatter per method, and per-visit delay time series at the second and last stops (in MLflow they load Plotly from its CDN so they render in the UI; `--tracking files` keeps one local `plotly.min.js` for offline viewing)
 
 It also prints a ready-to-paste LOG.md summary row.
 

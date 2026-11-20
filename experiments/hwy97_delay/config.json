@@ -1,0 +1,35 @@
+{
+  "study": "hwy97_delay",
+  "route_id": "97-KEL",
+  "direction_id": 0,
+  "timezone": "America/Vancouver",
+  "service_day_start_hour": 3,
+  "dev_dataset_id": "2026-11-10_2_months_r2",
+  "dev_archive_start": "2026-09-11 22:14:35",
+  "dev_archive_end": "2026-11-10 22:14:17",
+  "dev_end": "2026-11-09",
+  "fold_starts": [
+    "2026-09-28",
+    "2026-10-05",
+    "2026-10-12",
+    "2026-10-19",
+    "2026-10-26",
+    "2026-11-02"
+  ],
+  "block_days": 7,
+  "embargo_days": 1,
+  "test_start": "2026-11-11",
+  "test_end": "2026-11-24",
+  "test_dataset_id": "hwy97_delay_test_2026-11-10_to_2026-11-25",
+  "test_archive_start": "2026-11-10 22:14:18",
+  "test_archive_end": "2026-11-25 11:00:00",
+  "holidays": [
+    "2026-09-30",
+    "2026-10-12",
+    "2026-11-11"
+  ],
+  "bootstrap_reps": 2000,
+  "seed": 42,
+  "min_relative_improvement": 0.05,
+  "max_final_report_age_minutes": 10
+}

@@ -22,6 +22,9 @@ dependencies = [
 test = [
     "pytest>=7.0",
 ]
+tracking = [
+    "mlflow>=3",
+]
 
 [tool.setuptools]
 packages = ["forecasting"]
