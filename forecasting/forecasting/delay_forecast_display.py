@@ -657,7 +657,13 @@ def make_segment_timeseries_figure(
         row=3,
         col=1,
     )
-    return _style(figure, f"Segment {label}: {len(links):,} traversals", 980)
+    figure = _style(figure, f"Segment {label}: {len(links):,} traversals", 1020)
+    # Seven legend entries wrap; keep them below the plot, clear of the title.
+    figure.update_layout(
+        legend=dict(orientation="h", x=0, y=-0.1, yanchor="top"),
+        margin=dict(t=80, b=150),
+    )
+    return figure
 
 
 def make_segment_traversal_scatter(
