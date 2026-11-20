@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from .road_segment_congestion import _normalize_direction_ids, _require_columns
+from .timestamp_correction import correct_timestamp_shifts, schedule_clock_agreement
 from .traversal_models import (
     BASELINE_MODELS,
     ShuffledTargetTraversal,
@@ -97,6 +98,13 @@ class StudyConfig:
     max_final_report_age_minutes : float
         A final report published more than this long before the event it
         describes is a stale prediction, not an observation, and is excluded.
+    timestamp_shifts : tuple of dict
+        Temporary clock corrections (``from_stored``, ``to_stored``,
+        ``add_hours``) applied to trip updates before preparation; see
+        :mod:`forecasting.timestamp_correction`.
+    min_schedule_clock_agreement : float
+        Minimum monthly share of journeys whose first-stop scheduled departure
+        matches their start descriptor; lower agreement stops the run.
     """
 
     study: str
@@ -121,6 +129,8 @@ class StudyConfig:
     seed: int
     min_relative_improvement: float
     max_final_report_age_minutes: float = 10.0
+    timestamp_shifts: tuple[dict[str, Any], ...] = ()
+    min_schedule_clock_agreement: float = 0.95
 
     def __post_init__(self) -> None:
         """Validate split ordering so no fold can reach the locked test."""
@@ -155,6 +165,7 @@ class StudyConfig:
             raw[key] = date.fromisoformat(raw[key])
         for key in ("fold_starts", "holidays"):
             raw[key] = tuple(date.fromisoformat(value) for value in raw[key])
+        raw["timestamp_shifts"] = tuple(raw.get("timestamp_shifts", ()))
         return cls(**raw)
 
     def to_dict(self) -> dict[str, Any]:
@@ -229,6 +240,7 @@ def prepare_origin_visits(
     timezone: str = "America/Vancouver",
     service_day_start_hour: int = 3,
     max_final_report_age_minutes: float = 10.0,
+    clock_tolerance_minutes: float = 1.0,
 ) -> OriginVisits:
     """Build origin-time features, feed baselines and final outcomes per visit.
 
@@ -240,6 +252,9 @@ def prepare_origin_visits(
     unless that report was published more than
     ``max_final_report_age_minutes`` before the arrival it describes: such a
     report is an un-updated prediction, so the visit is excluded as stale.
+    A journey whose first-stop scheduled departure (local wall time) differs
+    from its own start descriptor by more than ``clock_tolerance_minutes`` has
+    untrustworthy timestamps and is excluded as ``schedule_clock_mismatch``.
     Missing values are never filled from other publications.
 
     Parameters
@@ -260,6 +275,9 @@ def prepare_origin_visits(
     max_final_report_age_minutes : float, default 10.0
         Maximum time from a final report's publication to the arrival (or,
         for a training link's upstream end, the departure) it describes.
+    clock_tolerance_minutes : float, default 1.0
+        Allowed difference between a journey's first-stop scheduled departure
+        and its start descriptor.
 
     Returns
     -------
@@ -411,6 +429,15 @@ def prepare_origin_visits(
     visits["service_day"] = _service_day(
         anchor_clock.fillna(visits["origin_time"]), timezone, service_day_start_hour
     )
+    descriptor = pd.to_datetime(
+        visits["trip_instance_key"].str.split("|").str[1], errors="coerce"
+    )
+    clock_difference = (
+        anchor_clock.dt.tz_convert(timezone).dt.tz_localize(None) - descriptor
+    ).abs()
+    clock_mismatch = clock_difference.gt(
+        pd.Timedelta(minutes=clock_tolerance_minutes)
+    ).fillna(False)
 
     previous = visits.groupby("trip_instance_key", sort=False)[
         [
@@ -456,6 +483,7 @@ def prepare_origin_visits(
         [
             ("anchor_stop", visits["is_first_stop"]),
             ("missing_anchor", visits["anchor_time"].isna()),
+            ("schedule_clock_mismatch", clock_mismatch),
             (
                 "missing_origin_report",
                 visits["origin_arrival_time"].isna()
@@ -501,6 +529,7 @@ def prepare_origin_visits(
         )
     links["train_exclusion_reason"] = _first_reason(
         [
+            ("schedule_clock_mismatch", clock_mismatch.loc[links.index]),
             ("cancelled_trip", cancelled.loc[links.index]),
             ("skipped_or_no_data", skipped.loc[links.index] | upstream_skipped),
             ("missing_scheduled_departure", links["scheduled_departure"].isna()),
@@ -1051,6 +1080,8 @@ def run_study(
         raise ValueError("split must be 'dev' or 'test'.")
     if split == "test":
         check_test_access(config, approved=approved, today=today)
+    if config.timestamp_shifts:
+        trip_updates = correct_timestamp_shifts(trip_updates, config.timestamp_shifts)
     prepared = prepare_origin_visits(
         trip_updates,
         route_id=config.route_id,
@@ -1059,6 +1090,13 @@ def run_study(
         service_day_start_hour=config.service_day_start_hour,
         max_final_report_age_minutes=config.max_final_report_age_minutes,
     )
+    clock = schedule_clock_agreement(prepared.visits, timezone=config.timezone)
+    low = clock.loc[clock["agreement"].lt(config.min_schedule_clock_agreement)]
+    if not low.empty:
+        raise ValueError(
+            "Realtime timestamps disagree with trip start descriptors; check "
+            f"timestamp_shifts in the study config:\n{low.to_string(index=False)}"
+        )
     if split == "dev":
         horizon = pd.Timestamp(config.dev_end)
         prepared = OriginVisits(
@@ -1094,6 +1132,7 @@ def run_study(
     )
     candidate = None if model_name in BASELINE_MODELS else model_name
     metrics = score_predictions(predictions, config=config, candidate=candidate)
+    metrics["schedule_clock"] = clock
     info = {
         "split": split,
         "model": model_name,

@@ -96,7 +96,12 @@ def _journey(
                     "arrival_time": arrival,
                     "departure_delay": departure_delay,
                     "departure_time": departure,
-                    "trip_start_timestamp": str(first_departure),
+                    # The agency descriptor is local wall time, like the real feed.
+                    "trip_start_timestamp": str(
+                        first_departure.tz_convert("America/Vancouver").tz_localize(
+                            None
+                        )
+                    ),
                 }
             )
     return rows

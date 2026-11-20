@@ -76,7 +76,7 @@ On the locked test set, the candidate's paired MAE difference vs B0 has a day-cl
 - [x] Minimum effect size: **5% relative MAE reduction** vs B0 (revisable before the test is unlocked).
 - [x] Stale final reports (> 10 min before the reported arrival) are excluded from truth (2026-11-19, interim; see issue #12).
 - [ ] Untracked journeys (every final delay exactly 0 s, e.g. all of 2026-11-01): exclude?
-- [ ] Timestamp correction: stored times are 1 h early during standard time (after 2026-11-01, and before 2026-03-08). Correct in the loader, fix at the source, or both?
+- [x] Timestamp correction (2026-11-19, interim): stored times are 1 h early for rows written since the 2026-11-02 ingestion restart (not the DST change itself). The harness adds the hour back (`timestamp_shifts` in config.json), excludes journeys whose scheduled departure disagrees with their start descriptor (`schedule_clock_mismatch`), and stops if any month's agreement is below 95%. Root cause: [issue #13](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/13), investigated on a separate branch.
 
 ## Backlog (agent proposes, owner prioritises)
 

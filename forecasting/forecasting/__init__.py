@@ -97,6 +97,7 @@ from .stop_dynamics_model import (
     evaluate_stop_dynamics_identity,
     fit_stop_dynamics_model,
 )
+from .timestamp_correction import correct_timestamp_shifts, schedule_clock_agreement
 from .traversal_models import (
     CalendarMedianTraversal,
     HarmonicTraversal,
@@ -117,6 +118,8 @@ from .trip_updates import (
 )
 
 __all__ = [
+    "correct_timestamp_shifts",
+    "schedule_clock_agreement",
     "OriginVisits",
     "StudyConfig",
     "StudyRun",

@@ -87,6 +87,12 @@ def flatten_metrics(metrics: Mapping[str, Any]) -> dict[str, float]:
         for record in frame.to_dict("records"):
             for method in methods:
                 flat[_key(prefix, record[group], method)] = record[method]
+    clock = metrics.get("schedule_clock")
+    if clock is not None:
+        for record in clock.to_dict("records"):
+            flat[_key("schedule_clock_agreement", record["service_month"])] = record[
+                "agreement"
+            ]
     for section in ("control", "criterion"):
         for name, value in (metrics.get(section) or {}).items():
             flat[_key(section, name)] = float(value)

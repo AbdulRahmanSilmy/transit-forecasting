@@ -59,7 +59,7 @@ The harness, not the model, applies the dwell rule, the anchor and the identity 
 
 ## Pipeline
 
-1. Load the window from R2 or the local snapshot (`get_backtest_dataset`), route `97-KEL`, direction 0.
+1. Load the window from R2 or the local snapshot (`get_backtest_dataset`), route `97-KEL`, direction 0. Apply `timestamp_shifts` (temporary, issue #13), then check each month's schedule-clock agreement: first-stop scheduled departure vs the trip start descriptor. The run stops below `min_schedule_clock_agreement`, and the per-month table is saved in `metrics.json` and MLflow.
 2. Build dated journeys, consecutive stop pairs and the segment catalogue (reuse `prepare_segment_traversal_eda` and `prepare_early_traversal_comparison` logic).
 3. For each journey, find `t0`, the origin-feed scheduled arrivals for every stop, the B0 estimate per stop, and the final truth.
 4. Per fold: fit on visits whose final publication is before the cutoff, predict traversal for every segment of every evaluation journey, then chain from the anchor.
