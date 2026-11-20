@@ -13,6 +13,12 @@
 	- `conda run -n transit_env pytest tests/unit -q`
 	- `conda run -n transit_env ./run_integration_tests.sh`
 
+## Research Loop
+- Research studies live in `experiments/<study>/` (`RESEARCH.md` charter, `LOG.md` ledger, `HARNESS.md` contract). Run iterations with the `research-loop` skill.
+- The evaluation harness, frozen definitions, success criteria and locked-test dates are owner-controlled: do not edit them without asking.
+- Never load, score or plot a study's locked-test period unless the owner explicitly approves it.
+- Log every scored run in `LOG.md`, including negative and inconclusive results.
+
 ## Notes
 - Add future guidelines here.
 

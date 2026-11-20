@@ -1,0 +1,95 @@
+# Research charter: recurring traversal + delay dynamics vs Transit BC's earliest estimate
+
+This file steers the research loop. The human owner edits **Question, Success criterion, Locked test, Open decisions and Backlog priority**. Agents may append to the Backlog and Findings sections, but must not change the definitions below without asking.
+
+## Question
+
+For Route `97-KEL`, direction 0 (Highway 97), at the **earliest moment Transit BC publishes a delay estimate for a journey** (about 150 minutes before arrival), does a forecast built from
+
+1. learned **recurring traversal times** for each directed stop-to-stop segment, chained through
+2. the **delay dynamics identity** $d_k = d_{k-1} + T_k + W_k - S_k$,
+
+predict final arrival delay at each stop more accurately than Transit BC's own earliest estimate?
+
+Scope: repeated patterns only. Anomalous delays (incidents, detours) stay in the scores but are not modelled.
+
+## Definitions (frozen; change only with owner approval)
+
+| Item | Definition |
+|---|---|
+| Prediction unit | One stop visit `(trip_instance_key, stop_sequence)` on a direction-0 journey |
+| Origin `t0` | The journey's **first** trip-update publication. `lead = final arrival_time - t0` is recorded for every row |
+| Truth | Final reported `arrival_delay` (latest publication). This is a feed proxy, not an independent measurement |
+| Comparator B0 (Transit BC) | `arrival_delay` for that stop in the latest publication at or before `t0` |
+| Scheduled allowance `S_k` | From origin-time feed fields only: `(A - D)` at `t0` for both endpoints. Never the latest publication |
+| Traversal `T_k` | Upstream departure to downstream arrival (excludes upstream dwell), as in the harmonic notebook |
+| Dwell `W_k` | **Not modelled.** Fixed rule (see Open decisions); default is the per-stop training median |
+| Anchor `d_0` | Transit BC's earliest estimate at the journey's **first** stop. All accumulated change after the anchor comes from our model |
+| Candidate forecast | $\hat d_k = d_0 + \sum_{j \le k} (\hat T_j + \hat W_j - S_j)$ |
+
+Anchoring on Transit BC's first-stop estimate is deliberate. Both methods start from the same information, so any difference measures only whether our traversal dynamics propagate delay better.
+
+## Metrics
+
+- **Primary:** MAE of arrival delay (seconds) over all scored stop visits, and the **paired difference vs B0** with a 95% bootstrap CI that resamples **service days** (rows on the same day are correlated).
+- **Secondary:** MAE by stop (error accumulates downstream), by lead bin, by peak/off-peak and weekday; bias; RMSE; paired win rate; macro-stop MAE.
+- **Diagnostic only:** a "typical" stratum (B0 absolute error below its training P90). This is never used for tuning or claims.
+- **Excluded from primary scoring:** BC statutory holidays (e.g. Thanksgiving Oct 12, Remembrance Day Nov 11). They are scored and reported separately.
+
+## Baseline ladder (every run reports all of these on identical rows)
+
+| ID | Forecast | Why it matters |
+|---|---|---|
+| B0 | Transit BC earliest estimate | The target to beat |
+| B1 | Anchor held constant ($\hat T + \hat W = S$) | Is B0 just schedule propagation? |
+| B2 | Identity with per-segment training **median** traversal | Dynamics without any calendar pattern |
+| B3 | Identity with segment × weekday × hour median traversal | Simple calendar lookup |
+| C* | Identity with a learned traversal model (harmonic, pooled, ...) | The hypothesis |
+
+A candidate supports the hypothesis only if it beats **B0 and B3**. Beating B0 alone could be credited to the dynamics identity rather than learned recurring patterns. (Prior evidence: on segment 4, the harmonic model lost to a constant median.)
+
+## Success criterion (predeclared)
+
+On the locked test set, the candidate's paired MAE difference vs B0 has a day-clustered 95% CI entirely below zero. Its relative MAE reduction must be **≥ 5%**, and it must also beat B3. The owner may revise the 5% threshold before the test is unlocked, never after.
+
+## Data and splits
+
+- Source: Cloudflare R2 archive. Trip updates are available from **2026-01-11** (audit coverage first).
+- **Development:** service days up to and including 2026-11-09. Use expanding-window weekly CV folds over the most recent 6 weeks (2026-09-28 to 2026-11-08), with a 1-day embargo. Data before the first fold is training-only.
+- **Embargo:** 2026-11-10.
+- **Locked test:** service days from **2026-11-11** through **2026-11-24** (at least two full weeks). Agents never load, score or plot this period. It is unlocked **once**, by the owner, for the final candidate.
+- Service day = local date with a 03:00 cutover, `America/Vancouver`.
+
+## Leakage guardrails (the harness asserts these)
+
+1. No feature for a row uses any publication after that journey's `t0`.
+2. `S_k` and the anchor come from origin-time fields only.
+3. Traversal/dwell training uses only visits whose **final** publication is before the fold cutoff.
+4. All methods are scored on exactly the same rows. Rows any method cannot predict are counted and reported, never silently dropped.
+5. Shuffled-target control: a model trained on permuted traversals must not beat B2.
+
+## Decisions (owner, 2026-11-19)
+
+- [x] Dwell rule: **per-stop training median**. Zero dwell may run only as a labelled ablation (H5).
+- [x] Origin: **earliest publication per journey**.
+- [x] Scope: **direction 0 only**. Direction 1 is out of scope for this study.
+- [x] Minimum effect size: **5% relative MAE reduction** vs B0 (revisable before the test is unlocked).
+
+## Backlog (agent proposes, owner prioritises)
+
+| ID | Hypothesis | Cheapest test | Status |
+|---|---|---|---|
+| H0 | Build the harness and baseline ladder (B0 to B3) | Iteration 0: implement and reproduce B0 | open |
+| H1 | **Priority.** The morning traffic peak shifted after Nov 1, coinciding with the DST change (Sun **2026-11-01**), and this caused the harmonic model's worse holdout performance. Either a timezone bug (1-hour **phase** shift in features or clocks) or a genuine change in timing/level | Compare fitted vs observed morning-peak timing and height by week around Nov 1; audit every tz conversion | open |
+| H2 | Ten months of history (vs two) gives more stable recurring patterns than the 2-month window | Same model, training start Jan vs Sep | open |
+| H3 | A recent-level term (e.g. trailing 2-week median offset) fixes the level shift without chasing anomalies | Harmonic + rolling level vs harmonic | open |
+| H4 | A pooled model across segments (segment effects + shared calendar) beats per-segment models | Pooled vs per-segment harmonic | open |
+| H5 | Dwell median vs zero changes the conclusion | Ablation | open |
+
+## Findings
+
+Record concluded results here, one bullet each, with the LOG entry IDs behind them.
+
+- **Prior evidence, segment 4 only (E000).** During training, the harmonic traversal model tracked recurring traffic better than Transit BC's earliest estimate, especially the **early-day (morning) peak, which Transit BC under-predicts**. Caveat: this is an in-sample fit, not held-out skill.
+- **Prior evidence, segment 4 only (E000).** In the holdout week (Nov 3–9, after Nov 1), the **morning peak appears shifted** relative to the learned pattern. The harmonic model then did worse than Transit BC's earliest estimate (traversal MAE 1.248 vs 1.022 min) and a constant median (1.133 min). The cause is unresolved; see H1.
+- Implication: the recurring pattern Transit BC misses is real enough to motivate the study. Whether it survives a regime change like Nov 1 is the main risk.
