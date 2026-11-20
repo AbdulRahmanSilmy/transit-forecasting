@@ -88,6 +88,54 @@ from forecasting import get_backtest_dataset
 dataset = get_backtest_dataset("data", source="cache", dataset_id=None)
 ```
 
+### R2 archive (default for notebooks)
+
+The full realtime history lives in a Cloudflare R2 bucket as one zstd Parquet
+file per table and UTC day (`archive/<table>/date=YYYY-MM-DD/data.parquet`),
+written by `python -m data_ingestion.archive`. The Raspberry Pi MySQL database
+keeps only recent days. Put the R2 settings in the ignored repository `.env`:
+
+```text
+R2_ACCOUNT_ID=...
+R2_BUCKET=...
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+```
+
+`source="r2"` reads an inclusive UTC window, optionally filtered by route and
+direction, downloads current static GTFS, and saves a normal snapshot. If the
+`dataset_id` is already saved, it is replayed offline instead, so rerunning a
+notebook does not download again. Choose a new `dataset_id` for a new window.
+
+```python
+dataset = get_backtest_dataset(
+    "data",
+    source="r2",
+    dataset_id="route97_direction0_october",
+    env_file=".env",
+    archive_start="2026-10-01 00:00:00",
+    archive_end="2026-10-31 23:59:59",
+    route_id="97-KEL",
+    direction_id=0,
+)
+```
+
+For ad hoc reads without a snapshot, use `load_archive_updates` (returns the
+same columns and dtypes as a MySQL download, newest `id` first) and
+`list_archive_days`. Days not yet archived raise `FileNotFoundError`; the
+newest day reaches R2 after the nightly export.
+
+```python
+from forecasting import load_archive_updates
+
+trips = load_archive_updates(
+    "trip_updates", "2026-11-01", "2026-11-07 23:59:59",
+    route_id="97-KEL", direction_id=0, env_file=".env",
+)
+```
+
+### MySQL download
+
 In download mode, the optional `env_file` supplies shell-style `TRANSIT_DB_*`
 settings; otherwise the existing environment is used. Cache mode never reads
 credentials. File settings do not modify the process environment.

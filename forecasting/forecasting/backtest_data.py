@@ -1,7 +1,8 @@
-"""Download or replay self-contained GTFS backtest datasets."""
+"""Download, archive-load, or replay self-contained GTFS backtest datasets."""
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 from collections.abc import Mapping
@@ -18,6 +19,7 @@ from .backtest_cache import (
     load_backtest_dataset,
     save_backtest_dataset,
 )
+from .r2_archive import load_archive_updates
 from .static_gtfs import download_static_gtfs
 
 _CONNECTION_ENV_VARS = {
@@ -115,26 +117,81 @@ def _connection_parameters_from_env_file(
     return {key: values[variable] for key, variable in _CONNECTION_ENV_VARS.items()}
 
 
+def _check_saved_window(
+    directory: Path,
+    archive_start: str | pd.Timestamp | None,
+    archive_end: str | pd.Timestamp | None,
+) -> None:
+    """Reject a saved snapshot whose rows fall outside the requested window.
+
+    Parameters
+    ----------
+    directory : pathlib.Path
+        Saved dataset directory containing ``metadata.json``.
+    archive_start, archive_end : str or pandas.Timestamp or None
+        Requested inclusive UTC bounds; a None bound is not checked.
+
+    Raises
+    ------
+    ValueError
+        If the snapshot's first or last ``feed_timestamp`` lies outside the
+        requested bounds, which means the ``dataset_id`` was reused for a
+        different window.
+    """
+    metadata = json.loads((directory / "metadata.json").read_text())
+    start = None if archive_start is None else _as_utc(archive_start)
+    end = None if archive_end is None else _as_utc(archive_end)
+    for table in ("vehicle", "trip"):
+        first, last = metadata.get(f"{table}_start_utc"), metadata.get(
+            f"{table}_end_utc"
+        )
+        if first is None or last is None:
+            continue
+        if (start is not None and _as_utc(first) < start) or (
+            end is not None and _as_utc(last) > end
+        ):
+            raise ValueError(
+                f"Saved dataset {directory.name!r} holds {table} updates from "
+                f"{first} to {last}, outside the requested window {archive_start} "
+                f"to {archive_end}. Use a new dataset_id for a different window."
+            )
+
+
+def _as_utc(value: str | pd.Timestamp) -> pd.Timestamp:
+    timestamp = pd.Timestamp(value)
+    if timestamp.tzinfo is None:
+        return timestamp.tz_localize("UTC")
+    return timestamp.tz_convert("UTC")
+
+
 def get_backtest_dataset(
     data_dir: str | Path,
     *,
-    source: Literal["cache", "download"] = "cache",
+    source: Literal["cache", "r2", "download"] = "cache",
     dataset_id: str | None = None,
     env_file: str | Path | None = None,
     vehicle_query: str | None = None,
     vehicle_query_params: Mapping[str, Any] | None = None,
     trip_query: str | None = None,
     trip_query_params: Mapping[str, Any] | None = None,
+    archive_start: str | pd.Timestamp | None = None,
+    archive_end: str | pd.Timestamp | None = None,
+    route_id: str | None = None,
+    direction_id: int | None = None,
 ) -> BacktestDataset:
-    """Load a saved backtest or explicitly download and cache a new snapshot.
+    """Load a saved backtest or build and cache a new snapshot.
 
     Parameters
     ----------
     data_dir : str or pathlib.Path
         Data root containing ``backtests/`` and ``static_gtfs_cache/``.
-    source : {'cache', 'download'}, optional
-        Defaults to offline replay. Download mode fetches both realtime tables
-        and current static GTFS, then publishes a new self-contained snapshot.
+    source : {'cache', 'r2', 'download'}, optional
+        Defaults to offline replay. ``'r2'`` reads the realtime window from
+        the Cloudflare R2 Parquet archive and downloads current static GTFS,
+        then publishes a self-contained snapshot; if ``dataset_id`` is already
+        saved, that snapshot is replayed instead, without network access.
+        ``'download'`` queries the Raspberry Pi MySQL database, which keeps
+        only recent days once older days are archived.
     dataset_id : str or None, optional
         Saved dataset to select in cache mode, or unique name for a new
         snapshot in download mode. None selects the most recently saved
@@ -144,9 +201,10 @@ def get_backtest_dataset(
         or making database/network calls. Use letters, digits, dots, dashes,
         or underscores, starting with a letter or digit.
     env_file : str or pathlib.Path or None, optional
-        Optional database settings file, read only in download mode.
-        If absent, use the existing ``TRANSIT_DB_*`` environment variables.
-        Settings are never written to the snapshot or process environment.
+        Settings file, conventionally the repository ``.env``. Download mode
+        reads ``TRANSIT_DB_*`` and R2 mode reads ``R2_*`` values from it,
+        falling back to the environment. Settings are never written to the
+        snapshot or process environment.
     vehicle_query, trip_query : str or None, optional
         SQL overrides for the vehicle and trip downloads, respectively.
         Each defaults to the existing all-route query when None. Use named
@@ -162,6 +220,12 @@ def get_backtest_dataset(
         values, with None meaning no parameters. Ignored in cache mode.
         Snapshot metadata records a shared positive integer ``lookback_hours``
         only when both mappings specify the same value; otherwise it is None.
+    archive_start, archive_end : str or pandas.Timestamp or None, optional
+        Inclusive UTC ``feed_timestamp`` bounds for R2 mode; required there
+        and ignored otherwise. Naive values are UTC.
+    route_id, direction_id : str or int or None, optional
+        Optional ``trip_route_id`` and ``trip_direction_id`` filters for R2
+        mode, applied to both tables.
 
     Returns
     -------
@@ -171,7 +235,8 @@ def get_backtest_dataset(
     Raises
     ------
     FileNotFoundError
-        If no cached datasets exist or the requested dataset is absent.
+        If no cached datasets exist, the requested dataset is absent, or an
+        R2 window includes days that are not archived yet.
     FileExistsError
         If the requested download name is already occupied. The destination
         is checked again when saving; existing snapshots are never overwritten.
@@ -180,6 +245,8 @@ def get_backtest_dataset(
         files are invalid.
     RuntimeError
         If database environment settings are missing in download mode.
+    ImportError
+        If ``duckdb`` is not installed in R2 mode.
     OSError
         If reading, downloading, or saving fails. Cache errors never trigger
         a substitute download.
@@ -202,6 +269,36 @@ def get_backtest_dataset(
             )
         directory = cache_dir / selected_id
         vehicle_updates, trip_updates = load_backtest_dataset(directory)
+    elif source == "r2":
+        if dataset_id is not None:
+            try:
+                _get_available_dataset_directory(cache_dir, dataset_id)
+            except FileExistsError:
+                cached = get_backtest_dataset(
+                    data_root, source="cache", dataset_id=dataset_id
+                )
+                _check_saved_window(cached.directory, archive_start, archive_end)
+                return cached
+        if archive_start is None or archive_end is None:
+            raise ValueError("R2 mode requires archive_start and archive_end.")
+        filters = {
+            "start": archive_start,
+            "end": archive_end,
+            "route_id": route_id,
+            "direction_id": direction_id,
+            "env_file": env_file,
+        }
+        vehicle_updates = load_archive_updates("vehicle_updates", **filters)
+        trip_updates = load_archive_updates("trip_updates", **filters)
+        static_data_dir = download_static_gtfs(data_root / "static_gtfs_cache")
+        directory = save_backtest_dataset(
+            cache_dir,
+            vehicle_updates,
+            trip_updates,
+            static_data_dir,
+            dataset_id=dataset_id,
+            source="r2",
+        )
     elif source == "download":
         if dataset_id is not None:
             _get_available_dataset_directory(cache_dir, dataset_id)
@@ -248,7 +345,7 @@ def get_backtest_dataset(
             source="database",
         )
     else:
-        raise ValueError("Choose source: 'cache' or 'download'.")
+        raise ValueError("Choose source: 'cache', 'r2', or 'download'.")
     return BacktestDataset(directory, vehicle_updates, trip_updates)
 
 

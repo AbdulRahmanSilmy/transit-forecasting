@@ -1,5 +1,7 @@
+import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, call
 
 import pandas as pd
@@ -423,3 +425,129 @@ def test_get_dataset_does_not_save_failed_downloads(
 def test_get_dataset_rejects_unknown_source(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Choose source"):
         get_backtest_dataset(tmp_path, source="other")
+
+
+def test_get_dataset_r2_loads_both_tables_and_saves_snapshot(
+    tmp_path: Path, monkeypatch, dataset_downloads
+) -> None:
+    _, static, save = dataset_downloads
+    frames = {
+        "vehicle_updates": pd.DataFrame({"id": [1]}),
+        "trip_updates": pd.DataFrame({"id": [2]}),
+    }
+    load = Mock(side_effect=lambda table, **_: frames[table])
+    monkeypatch.setattr(backtest_data, "load_archive_updates", load)
+
+    result = get_backtest_dataset(
+        tmp_path,
+        source="r2",
+        dataset_id="r2-snapshot",
+        env_file=tmp_path / ".env",
+        archive_start="2026-09-01",
+        archive_end="2026-09-02 23:59:59",
+        route_id="97-KEL",
+        direction_id=0,
+    )
+
+    expected = {
+        "start": "2026-09-01",
+        "end": "2026-09-02 23:59:59",
+        "route_id": "97-KEL",
+        "direction_id": 0,
+        "env_file": tmp_path / ".env",
+    }
+    assert load.call_args_list == [
+        call("vehicle_updates", **expected),
+        call("trip_updates", **expected),
+    ]
+    save.assert_called_once_with(
+        tmp_path / "backtests",
+        frames["vehicle_updates"],
+        frames["trip_updates"],
+        static.return_value,
+        dataset_id="r2-snapshot",
+        source="r2",
+    )
+    assert result.trip_updates is frames["trip_updates"]
+
+
+def test_get_dataset_r2_replays_existing_snapshot_without_archive_access(
+    tmp_path: Path, monkeypatch, dataset_downloads
+) -> None:
+    saved = tmp_path / "backtests/saved"
+    saved.mkdir(parents=True)
+    _write_window_metadata(
+        saved, "2026-09-01T00:00:05+00:00", "2026-09-02T23:59:50+00:00"
+    )
+    load = Mock(side_effect=AssertionError("No archive access"))
+    replay = Mock(return_value=SimpleNamespace(directory=saved))
+    monkeypatch.setattr(backtest_data, "load_archive_updates", load)
+    original = backtest_data.get_backtest_dataset
+
+    def fake_get(data_dir, **kwargs):
+        if kwargs.get("source") == "cache":
+            return replay(data_dir, **kwargs)
+        return original(data_dir, **kwargs)
+
+    monkeypatch.setattr(backtest_data, "get_backtest_dataset", fake_get)
+
+    result = original(
+        tmp_path,
+        source="r2",
+        dataset_id="saved",
+        archive_start="2026-09-01",
+        archive_end="2026-09-02 23:59:59",
+    )
+
+    assert result is replay.return_value
+    replay.assert_called_once_with(tmp_path, source="cache", dataset_id="saved")
+    for operation in dataset_downloads:
+        operation.assert_not_called()
+
+
+def _write_window_metadata(directory: Path, first: str, last: str) -> None:
+    (directory / "metadata.json").write_text(
+        json.dumps(
+            {
+                "vehicle_start_utc": first,
+                "vehicle_end_utc": last,
+                "trip_start_utc": first,
+                "trip_end_utc": last,
+            }
+        )
+    )
+
+
+def test_get_dataset_r2_rejects_saved_snapshot_from_another_window(
+    tmp_path: Path, monkeypatch, dataset_downloads
+) -> None:
+    saved = tmp_path / "backtests/saved"
+    saved.mkdir(parents=True)
+    _write_window_metadata(
+        saved, "2026-05-25T05:26:59+00:00", "2026-07-10T22:14:15+00:00"
+    )
+    monkeypatch.setattr(
+        backtest_data,
+        "load_archive_updates",
+        Mock(side_effect=AssertionError("No archive access")),
+    )
+    original = backtest_data.get_backtest_dataset
+    monkeypatch.setattr(
+        backtest_data,
+        "get_backtest_dataset",
+        lambda data_dir, **kwargs: SimpleNamespace(directory=saved),
+    )
+
+    with pytest.raises(ValueError, match="outside the requested window"):
+        original(
+            tmp_path,
+            source="r2",
+            dataset_id="saved",
+            archive_start="2026-09-11 22:14:35",
+            archive_end="2026-11-10 22:14:17",
+        )
+
+
+def test_get_dataset_r2_requires_window(tmp_path: Path, dataset_downloads) -> None:
+    with pytest.raises(ValueError, match="archive_start and archive_end"):
+        get_backtest_dataset(tmp_path, source="r2", archive_start="2026-09-01")

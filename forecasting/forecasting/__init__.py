@@ -31,6 +31,7 @@ from .harmonic_regression import (
     make_harmonic_time_splits,
     save_harmonic_experiment,
 )
+from .r2_archive import list_archive_days, load_archive_updates
 from .road_segment_congestion import (
     CongestionResult,
     build_route_segments,
@@ -127,7 +128,9 @@ __all__ = [
     "get_segment_traversal_speeds",
     "get_stop_delay_horizons",
     "get_trip_updates_for_trip",
+    "list_archive_days",
     "list_backtest_datasets",
+    "load_archive_updates",
     "load_backtest_dataset",
     "make_congestion_map",
     "make_delay_congestion_map",
