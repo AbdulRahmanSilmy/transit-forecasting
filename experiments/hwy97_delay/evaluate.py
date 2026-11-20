@@ -134,6 +134,22 @@ def main(argv: list[str] | None = None) -> None:
         print(
             "\nMAE by period:\n", metrics["by_period"].round(1).to_string(index=False)
         )
+        traversal = metrics["traversal"]
+        print(
+            "\nTraversal (seconds):\n",
+            traversal["summary"].round(1).to_string(index=False),
+        )
+        print(
+            "\nDwell rules (seconds):\n",
+            traversal["dwell_summary"].round(1).to_string(index=False),
+        )
+        print(
+            "\nTraversal MAE by segment (s):\n",
+            traversal["by_segment"]
+            .drop(columns="segment_key")
+            .round(1)
+            .to_string(index=False),
+        )
         if metrics["control"] is not None:
             print("\nShuffled control:", metrics["control"])
             print("Criterion (development, indicative only):", metrics["criterion"])
@@ -146,6 +162,7 @@ def main(argv: list[str] | None = None) -> None:
             candidate=None if metrics["criterion"] is None else args.model,
             timezone=config.timezone,
             holidays=[pd.Timestamp(day) for day in config.holidays],
+            traversals=run.traversals,
         )
         provenance = {
             "args": vars(args),

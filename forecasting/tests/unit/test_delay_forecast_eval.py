@@ -229,7 +229,7 @@ def test_evaluate_block_trains_only_on_outcomes_before_cutoff():
             seen.append(links)
             return super().fit(links)
 
-    rows = evaluate_block(
+    rows, links = evaluate_block(
         prepared,
         model_name="calendar_median",
         block_start=date(2026, 10, 7),
@@ -244,6 +244,12 @@ def test_evaluate_block_trains_only_on_outcomes_before_cutoff():
     assert not set(rows["trip_instance_key"]) & set(seen[0]["trip_instance_key"])
     assert rows["service_day"].eq(pd.Timestamp("2026-10-07")).all()
     assert {f"pred_{m}" for m in (B0, B1, B2, B3)} <= set(rows.columns)
+    assert {f"trav_{m}" for m in (B0, B2, B3)} <= set(links.columns)
+    assert links["trip_instance_key"].isin(rows["trip_instance_key"]).all()
+    # Transit BC's implied traversal is the timetable run time (300 s here,
+    # with zero scheduled dwell), and our dwell rule never applies at stop 1.
+    assert links[f"trav_{B0}"].eq(300).all()
+    assert links.loc[links["upstream_is_first_stop"], "dwell_model"].eq(0).all()
 
 
 def test_calendar_median_learns_slow_departure_hour():
@@ -357,7 +363,10 @@ def test_run_figures_cover_methods_and_are_written(tmp_path):
         _config(), _updates(days=14), model_name="harmonic_huber", split="dev"
     )
     figures = make_run_figures(
-        run.predictions, candidate="harmonic_huber", timezone="America/Vancouver"
+        run.predictions,
+        candidate="harmonic_huber",
+        timezone="America/Vancouver",
+        traversals=run.traversals,
     )
     assert set(figures) == {
         "daily_error",
@@ -365,6 +374,12 @@ def test_run_figures_cover_methods_and_are_written(tmp_path):
         "actual_vs_predicted",
         "timeseries_stop_2",
         "timeseries_stop_4",
+        "segment_error_overview",
+        *(
+            f"segment_{seq:02d}_s{seq - 1}-s{seq}_{kind}"
+            for seq in (2, 3, 4)
+            for kind in ("timeseries", "traversal_scatter")
+        ),
     }
     scatter_names = {trace.name for trace in figures["actual_vs_predicted"].data}
     assert "Transit BC earliest (B0)" in scatter_names
@@ -383,3 +398,27 @@ def test_run_figures_cover_methods_and_are_written(tmp_path):
 def test_unknown_model_name_is_rejected():
     with pytest.raises(ValueError, match="Unknown"):
         make_traversal_model("nope", "UTC")
+
+
+def test_traversal_scores_match_known_errors():
+    run = run_study(
+        _config(), _updates(days=14), model_name="harmonic_huber", split="dev"
+    )
+    traversal = run.metrics["traversal"]
+    summary = traversal["summary"].set_index("method")
+    links = run.traversals.loc[
+        ~run.traversals["service_day"].isin([pd.Timestamp("2026-10-08")])
+    ]
+    expected = (links[f"trav_{B0}"] - links["actual_traversal_s"]).abs().mean()
+    assert summary.loc[B0, "MAE_s"] == pytest.approx(expected)
+    # The slow 15:00 UTC trips make segment medians wrong; calendar medians are not.
+    assert summary.loc[B3, "MAE_s"] < summary.loc[B2, "MAE_s"]
+    segments = traversal["by_segment"]
+    assert segments["segment"].tolist() == [
+        "seq 2: s1 -> s2",
+        "seq 3: s2 -> s3",
+        "seq 4: s3 -> s4",
+    ]
+    dwell = traversal["dwell_summary"].set_index("rule")
+    assert dwell.loc["model", "MAE_s"] == pytest.approx(0)
+    assert dwell.loc[B0, "MAE_s"] == pytest.approx(30)  # scheduled 0 vs 20/40 s

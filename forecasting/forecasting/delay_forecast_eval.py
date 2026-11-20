@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 from datetime import timezone as datetime_timezone
 from pathlib import Path
@@ -466,6 +466,7 @@ def prepare_origin_visits(
             "final_departure_time",
             "final_feed_timestamp",
             "scheduled_departure",
+            "scheduled_arrival",
             "calendar_departure",
             "is_first_stop",
         ]
@@ -532,6 +533,9 @@ def prepare_origin_visits(
     links["segment_key"] = links["from_stop_id"] + "->" + links["to_stop_id"]
     # Models see the calendar clock; chaining uses feed (physical) times.
     links["scheduled_departure"] = upstream["calendar_departure"]
+    links["feed_scheduled_departure"] = upstream["scheduled_departure"]
+    links["feed_scheduled_arrival"] = links["scheduled_arrival"]
+    links["upstream_feed_scheduled_arrival"] = upstream["scheduled_arrival"]
     links["upstream_is_first_stop"] = upstream["is_first_stop"].astype(bool)
     links["traversal_seconds"] = (
         links["final_arrival_time"] - upstream["final_departure_time"]
@@ -575,6 +579,9 @@ def prepare_origin_visits(
         "service_day",
         *REQUEST_COLUMNS,
         "upstream_is_first_stop",
+        "feed_scheduled_departure",
+        "feed_scheduled_arrival",
+        "upstream_feed_scheduled_arrival",
         "link_ok",
         "traversal_seconds",
         "upstream_dwell_seconds",
@@ -719,7 +726,7 @@ def evaluate_block(
     config: StudyConfig,
     fold: str,
     model_factory: Callable[[str, str], TraversalModel] = make_traversal_model,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit on links available before the cutoff and forecast one block.
 
     Parameters
@@ -741,9 +748,16 @@ def evaluate_block(
 
     Returns
     -------
-    pandas.DataFrame
+    visit_rows : pandas.DataFrame
         One row per scored visit with truth, ``pred_<method>`` columns and
         breakdown fields.
+    link_rows : pandas.DataFrame
+        One row per segment traversal of the block's scored journeys with a
+        valid observed outcome: ``actual_traversal_s``, ``actual_dwell_s``
+        (upstream dwell; NaN at the first stop), ``trav_<method>`` predictions
+        (B0 is the feed's scheduled run time) and ``dwell_<method>``
+        predictions (``dwell_B0_transit_bc`` is the scheduled dwell;
+        ``dwell_model`` is the median rule every chained method uses).
 
     Raises
     ------
@@ -799,6 +813,40 @@ def evaluate_block(
         methods[f"control_shuffled_{model_name}"] = ShuffledTargetTraversal(
             model_factory(model_name, config.timezone), seed=config.seed
         )
+    links_out = eval_links[
+        [
+            "trip_instance_key",
+            "stop_sequence",
+            "service_day",
+            "segment_key",
+            "from_stop_id",
+            "to_stop_id",
+            "upstream_is_first_stop",
+            "feed_scheduled_departure",
+            "scheduled_departure",
+            "traversal_seconds",
+            "upstream_dwell_seconds",
+            "train_exclusion_reason",
+        ]
+    ].rename(
+        columns={
+            "scheduled_departure": "calendar_departure",
+            "traversal_seconds": "actual_traversal_s",
+            "upstream_dwell_seconds": "actual_dwell_s",
+        }
+    )
+    links_out["fold"] = fold
+    links_out[f"trav_{B0}"] = (
+        eval_links["feed_scheduled_arrival"] - eval_links["feed_scheduled_departure"]
+    ).dt.total_seconds()
+    scheduled_dwell = (
+        eval_links["feed_scheduled_departure"]
+        - eval_links["upstream_feed_scheduled_arrival"]
+    ).dt.total_seconds()
+    links_out[f"dwell_{B0}"] = scheduled_dwell.where(
+        ~eval_links["upstream_is_first_stop"], 0.0
+    )
+    links_out["dwell_model"] = dwell
     for name, model in methods.items():
         model.fit(train)
         traversal = np.asarray(model.predict(requests), dtype=float)
@@ -806,7 +854,11 @@ def evaluate_block(
             raise ValueError(f"{name} returned {traversal.shape} predictions.")
         chained = chain_delay_forecast(eval_visits, eval_links, traversal, dwell)
         rows[f"pred_{name}"] = chained.loc[scored.index]
-    return rows.reset_index(drop=True)
+        links_out[f"trav_{name}"] = traversal
+    # Observed traversals must be valid outcomes (not stale, skipped, etc.).
+    links_out = links_out.loc[links_out["train_exclusion_reason"].eq("included")]
+    links_out = links_out.drop(columns="train_exclusion_reason")
+    return rows.reset_index(drop=True), links_out.reset_index(drop=True)
 
 
 def _errors(rows: pd.DataFrame, method: str) -> pd.Series:
@@ -1004,6 +1056,107 @@ def score_predictions(
     return result
 
 
+def segment_labels(traversals: pd.DataFrame) -> pd.Series:
+    """Readable label per segment key, ordered along the route.
+
+    Parameters
+    ----------
+    traversals : pandas.DataFrame
+        Traversal rows with ``segment_key``, ``stop_sequence``,
+        ``from_stop_id`` and ``to_stop_id``.
+
+    Returns
+    -------
+    pandas.Series
+        ``"seq <n>: <from> -> <to>"`` indexed by segment key, sorted by the
+        segment's median downstream stop sequence.
+    """
+    grouped = traversals.groupby("segment_key")
+    order = grouped["stop_sequence"].median().sort_values(kind="stable")
+    first = grouped[["from_stop_id", "to_stop_id"]].first().loc[order.index]
+    return pd.Series(
+        [
+            f"seq {int(sequence)}: {row.from_stop_id} -> {row.to_stop_id}"
+            for sequence, row in zip(order, first.itertuples())
+        ],
+        index=order.index,
+        name="segment",
+    )
+
+
+def score_traversals(
+    traversals: pd.DataFrame,
+    *,
+    config: StudyConfig,
+) -> dict[str, pd.DataFrame]:
+    """Score traversal and dwell predictions per method and per segment.
+
+    Rows with any non-finite traversal prediction and holiday service days are
+    excluded, so every method is scored on identical traversals.
+
+    Parameters
+    ----------
+    traversals : pandas.DataFrame
+        Concatenated ``link_rows`` from :func:`evaluate_block`.
+    config : StudyConfig
+        Holidays.
+
+    Returns
+    -------
+    dict
+        ``summary`` (traversal MAE/MedAE/RMSE/bias per method),
+        ``dwell_summary`` (dwell MAE/bias per dwell rule, upstream stops
+        after the first only) and ``by_segment`` (rows, label and traversal
+        MAE per method for each segment, in route order).
+    """
+    methods = [column[5:] for column in traversals if column.startswith("trav_")]
+    finite = np.all(
+        [np.isfinite(traversals[f"trav_{m}"]) for m in methods], axis=0
+    ) & np.isfinite(traversals["actual_traversal_s"])
+    holidays = {pd.Timestamp(day) for day in config.holidays}
+    rows = traversals.loc[finite & ~traversals["service_day"].isin(holidays)]
+    records = []
+    for method in methods:
+        error = rows[f"trav_{method}"] - rows["actual_traversal_s"]
+        records.append(
+            {
+                "method": method,
+                "rows": len(rows),
+                "MAE_s": error.abs().mean(),
+                "MedAE_s": error.abs().median(),
+                "RMSE_s": float(np.sqrt((error**2).mean())),
+                "bias_s": error.mean(),
+            }
+        )
+    dwell_rows = rows.loc[
+        ~rows["upstream_is_first_stop"] & rows["actual_dwell_s"].ge(0)
+    ]
+    dwell_records = []
+    for rule in [c for c in rows if c.startswith("dwell_")]:
+        error = dwell_rows[rule] - dwell_rows["actual_dwell_s"]
+        dwell_records.append(
+            {
+                "rule": rule[6:],
+                "rows": len(dwell_rows),
+                "MAE_s": error.abs().mean(),
+                "bias_s": error.mean(),
+            }
+        )
+    labels = segment_labels(rows)
+    errors = pd.DataFrame(
+        {m: (rows[f"trav_{m}"] - rows["actual_traversal_s"]).abs() for m in methods}
+    )
+    grouped = errors.groupby(rows["segment_key"].to_numpy())
+    by_segment = grouped.mean().reindex(labels.index)
+    by_segment.insert(0, "rows", grouped.size().reindex(labels.index))
+    by_segment.insert(0, "segment", labels)
+    return {
+        "summary": pd.DataFrame(records),
+        "dwell_summary": pd.DataFrame(dwell_records),
+        "by_segment": by_segment.rename_axis("segment_key").reset_index(),
+    }
+
+
 @dataclass(frozen=True)
 class StudyRun:
     """Predictions, scores and audit from one harness run.
@@ -1018,12 +1171,15 @@ class StudyRun:
         Preparation exclusion counts.
     info : dict
         Split, model, folds, cutoffs and data provenance.
+    traversals : pandas.DataFrame
+        Per-segment traversal and dwell predictions with observed outcomes.
     """
 
     predictions: pd.DataFrame
     metrics: dict[str, Any]
     audit: pd.DataFrame
     info: dict[str, Any]
+    traversals: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def check_test_access(
@@ -1138,24 +1294,24 @@ def run_study(
         blocks = [
             ("test", config.test_start, (config.test_end - config.test_start).days + 1)
         ]
-    predictions = pd.concat(
-        [
-            evaluate_block(
-                prepared,
-                model_name=model_name,
-                block_start=start,
-                block_days=days,
-                config=config,
-                fold=label,
-                model_factory=model_factory,
-            )
-            for label, start, days in blocks
-        ],
-        ignore_index=True,
-    )
+    blocks_out = [
+        evaluate_block(
+            prepared,
+            model_name=model_name,
+            block_start=start,
+            block_days=days,
+            config=config,
+            fold=label,
+            model_factory=model_factory,
+        )
+        for label, start, days in blocks
+    ]
+    predictions = pd.concat([visit for visit, _ in blocks_out], ignore_index=True)
+    traversals = pd.concat([link for _, link in blocks_out], ignore_index=True)
     candidate = None if model_name in BASELINE_MODELS else model_name
     metrics = score_predictions(predictions, config=config, candidate=candidate)
     metrics["schedule_clock"] = clock
+    metrics["traversal"] = score_traversals(traversals, config=config)
     info = {
         "split": split,
         "model": model_name,
@@ -1170,7 +1326,7 @@ def run_study(
         ],
         "data_end_utc": str(prepared.data_end),
     }
-    return StudyRun(predictions, metrics, prepared.audit, info)
+    return StudyRun(predictions, metrics, prepared.audit, info, traversals)
 
 
 def _jsonable(value: Any) -> Any:
@@ -1265,6 +1421,8 @@ def write_run(
         json.dumps(provenance | {"info": run.info}, indent=2, default=str)
     )
     run.predictions.to_csv(run_dir / "predictions.csv.gz", index=False)
+    if not run.traversals.empty:
+        run.traversals.to_csv(run_dir / "traversals.csv.gz", index=False)
     (run_dir / "metrics.json").write_text(
         json.dumps(_jsonable(run.metrics), indent=2, default=str)
     )
@@ -1273,6 +1431,10 @@ def write_run(
         figure_dir = run_dir / "figures"
         figure_dir.mkdir()
         for name, figure in figures.items():
-            figure.write_html(
-                figure_dir / f"{name}.html", full_html=True, include_plotlyjs=plotlyjs
-            )
+            path = figure_dir / f"{name}.html"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # "directory" mode references plotly.min.js next to each file.
+            mode = plotlyjs
+            if plotlyjs == "directory" and path.parent != figure_dir:
+                mode = "cdn"
+            figure.write_html(path, full_html=True, include_plotlyjs=mode)

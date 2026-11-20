@@ -94,6 +94,20 @@ def flatten_metrics(metrics: Mapping[str, Any]) -> dict[str, float]:
                 flat[_key("timetable", column, record["service_month"])] = record[
                     column
                 ]
+    traversal = metrics.get("traversal")
+    if traversal is not None:
+        for record in traversal["summary"].to_dict("records"):
+            for column in ("MAE_s", "MedAE_s", "RMSE_s", "bias_s"):
+                flat[_key("traversal_" + column, record["method"])] = record[column]
+        for record in traversal["dwell_summary"].to_dict("records"):
+            for column in ("MAE_s", "bias_s"):
+                flat[_key("dwell_" + column, record["rule"])] = record[column]
+        segments = traversal["by_segment"]
+        methods = [c for c in segments if c not in ("segment_key", "segment", "rows")]
+        for record in segments.to_dict("records"):
+            name = record["segment"].replace(": ", "_").replace(" -> ", "-")
+            for method in methods:
+                flat[_key("traversal_segment_MAE_s", name, method)] = record[method]
     for section in ("control", "criterion"):
         for name, value in (metrics.get(section) or {}).items():
             flat[_key(section, name)] = float(value)
