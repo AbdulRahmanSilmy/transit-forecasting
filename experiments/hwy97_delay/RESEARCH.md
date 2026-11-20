@@ -82,12 +82,13 @@ On the locked test set, the candidate's paired MAE difference vs B0 has a day-cl
 
 | ID | Hypothesis | Cheapest test | Status |
 |---|---|---|---|
-| H0 | Build the harness and baseline ladder (B0 to B3) | Iteration 0: implement and reproduce B0 | open |
-| H1 | **Priority.** The morning traffic peak shifted after Nov 1, coinciding with the DST change (Sun **2026-11-01**), and this caused the harmonic model's worse holdout performance. Either a timezone bug (1-hour **phase** shift in features or clocks) or a genuine change in timing/level | Compare fitted vs observed morning-peak timing and height by week around Nov 1; audit every tz conversion | open |
+| H0 | Build the harness and baseline ladder (B0 to B3) | Iteration 0: implement and reproduce B0 | done (E001) |
+| H1 | **Priority.** The morning traffic peak shifted after Nov 1, coinciding with the DST change (Sun **2026-11-01**), and this caused the harmonic model's worse holdout performance. Either a timezone bug (1-hour **phase** shift in features or clocks) or a genuine change in timing/level | Compare fitted vs observed morning-peak timing and height by week around Nov 1; audit every tz conversion | **cause found:** stored timestamps are 1 h early after DST ended (E001 notes). Re-test after correction |
 | H2 | Ten months of history (vs two) gives more stable recurring patterns than the 2-month window | Same model, training start Jan vs Sep | open |
 | H3 | A recent-level term (e.g. trailing 2-week median offset) fixes the level shift without chasing anomalies | Harmonic + rolling level vs harmonic | open |
 | H4 | A pooled model across segments (segment effects + shared calendar) beats per-segment models | Pooled vs per-segment harmonic | open |
 | H5 | Dwell median vs zero changes the conclusion | Ablation | open |
+| H6 | Departure delay at the first stop has a recurring pattern. All methods are biased early (−53 to −138 s, E001) because the anchor is Transit BC's 0-delay origin estimate | Learn a calendar median of first-stop departure delay as the anchor | open (proposed by agent) |
 
 ## Findings
 
