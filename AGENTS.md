@@ -26,7 +26,7 @@
 ## Research Loop
 - Research studies live in `experiments/<study>/` (`RESEARCH.md` charter, `LOG.md` ledger, `HARNESS.md` contract). Run iterations with the `research-loop` skill.
 - Work items live on the GitHub project [Hwy 97 delay forecasting](https://github.com/users/AbdulRahmanSilmy/projects/3), labelled `study:<study>`. Its `Priority` field (P1 first, then board order) sets the order. Move a ticket to `In Progress` when starting and to `Review` when finished; only the owner moves it to `Done`.
-- The evaluation harness, frozen definitions, success criteria and locked-test dates are owner-controlled: do not edit them without asking.
+- The evaluation harness, frozen definitions, success criteria and locked-test dates are owner-controlled. Change them only when the owner explicitly asks; a ticket or hypothesis that needs a harness change is not such a request. Comment on the ticket with what it needs and move on.
 - Never load, score or plot a study's locked-test period unless the owner explicitly approves it.
 - Log every scored run in `LOG.md`, including negative and inconclusive results.
 

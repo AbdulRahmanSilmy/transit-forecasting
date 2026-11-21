@@ -26,7 +26,7 @@ Read all three before starting.
 
 ## Hard rules
 
-- Never edit the harness files, frozen definitions, success criterion or locked-test dates without asking. If a ticket needs a harness change (anchor, dwell rule, chaining, data window), show the owner the proposed diff and wait for approval before committing it.
+- Never edit the harness files, frozen definitions, success criterion or locked-test dates. Tickets never authorise a harness change; only the owner's own explicit request does. If a ticket can't be tested without one (anchor, dwell rule, chaining, data window), don't build it: comment on the ticket with the harness change it needs, leave it in `Todo`, and move on to the next ticket.
 - Never load, score or plot locked-test data. `--split test` is owner-only.
 - Never drop rows by outcome to improve a score. Report exclusions.
 - Use at most 10 scored runs per session. Stop after 3 consecutive runs with no improvement over the best baseline, and summarise instead.
