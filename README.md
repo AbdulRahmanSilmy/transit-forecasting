@@ -83,7 +83,16 @@ conda run --no-capture-output -n transit_env mlflow ui \
 
 Then open http://127.0.0.1:5000 and pick the study's experiment (such as
 `hwy97_delay`). Add `--port <port>` if 5000 is already in use. Stop the server
-with `Ctrl+C`. The store only exists after at least one harness run; each
+with `Ctrl+C`.
+
+In VS Code, the **MLflow UI** task in [.vscode/tasks.json](.vscode/tasks.json)
+runs this automatically when the folder opens. Allow it once via
+*Tasks: Manage Automatic Tasks* → *Allow Automatic Tasks*. It assumes the
+`transit_env` environment lives at `~/miniconda3/envs/transit_env` and skips
+starting if port 5000 is already taken. Run it manually with
+*Tasks: Run Task* → *MLflow UI*, and stop it by closing its terminal.
+
+The store only exists after at least one harness run; each
 study's `LOG.md` cites the MLflow run ID for every logged result, and its
 `HARNESS.md` lists what each run records.
 

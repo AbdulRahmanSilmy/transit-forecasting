@@ -1,0 +1,31 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "MLflow UI",
+            "detail": "Serve the local experiment store (data/mlflow) at http://127.0.0.1:5000",
+            "type": "shell",
+            "command": "mkdir -p data/mlflow && if (exec 3<>/dev/tcp/127.0.0.1/5000) 2>/dev/null; then echo 'Port 5000 is already in use (MLflow UI probably running in another window): http://127.0.0.1:5000'; else exec \"${userHome}/miniconda3/envs/transit_env/bin/mlflow\" ui --backend-store-uri sqlite:///data/mlflow/mlflow.db --host 127.0.0.1 --port 5000; fi",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "MLFLOW_DISABLE_AGENT_HINT": "1"
+                },
+                "shell": {
+                    "executable": "/bin/bash",
+                    "args": ["-c"]
+                }
+            },
+            "isBackground": true,
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "silent",
+                "panel": "dedicated",
+                "showReuseMessage": false
+            },
+            "runOptions": {
+                "runOn": "folderOpen"
+            }
+        }
+    ]
+}
