@@ -102,6 +102,14 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Verdict: diagnostic only; no change to the baseline.
 - Next: H6 (anchor departure delay), and H7 (recovery-aware chaining).
 
+### E005: pooled harmonic traversal, shared calendar shape (H4, #17)
+
+- Hypothesis: H4. A pooled model (per-segment robust level plus **one** harmonic calendar shape shared by all segments) beats per-segment harmonic models, especially on low-support segments.
+- Prediction before running: **no overall gain.** Almost every segment has thousands of training links, so the per-segment fallback rarely applies, while a fully shared shape loses segment-specific peaks. Expected traversal MAE 34–37 s (harmonic 33.7), worst on seq 6 (the notebook's segment 4); delay MAE 134–139 s (harmonic 134.5, B3 137.0). Gains, if any, only on low-support segments with few rows.
+- Pre-declared follow-up (run only if E005 loses on segments with their own peaks): `pooled_harmonic_partial`, the same model plus per-segment deviations from the shared shape at L1 `alpha=0.01` (shared shape `0.003`). Predicted within ±1.5 s of harmonic delay MAE. No other variants or tuning.
+- Note: H6, H7, H2 and H5 (higher or equal priority) are blocked because they need harness changes (see their tickets), so H4 runs first.
+- Change: `PooledHarmonicTraversal` in `traversal_models.py`, registered as `pooled_harmonic` and `pooled_harmonic_partial`; unit tests in `tests/unit/test_traversal_models.py`. No harness change.
+
 <!-- Template for new entries:
 
 ### E0NN: <short title>

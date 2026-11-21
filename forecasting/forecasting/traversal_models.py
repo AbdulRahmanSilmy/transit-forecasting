@@ -259,6 +259,115 @@ class HarmonicTraversal:
         return prediction
 
 
+class PooledHarmonicTraversal:
+    """Segment levels plus one calendar shape shared across segments (H4).
+
+    On log traversal minutes, each segment gets a robust level (its training
+    median) and all segments share one Huber-Lasso harmonic shape fitted on
+    the pooled level-removed residuals. With ``deviation_alpha`` set, each
+    segment with at least ``min_rows`` links also fits its own harmonic
+    deviation from the shared shape, with that (stronger) L1 penalty, so
+    segment shapes are shrunk towards the pooled one (partial pooling).
+
+    Parameters
+    ----------
+    daily_order, weekly_order : int, default 6, 3
+        Harmonic orders.
+    alpha : float, default 0.003
+        L1 penalty of the shared shape.
+    delta : float, default 0.15
+        Huber transition in log units.
+    deviation_alpha : float or None, default None
+        L1 penalty of per-segment deviations; ``None`` shares the shape fully.
+    timezone : str, default "America/Vancouver"
+        Calendar timezone.
+    min_rows : int, default 100
+        Minimum links for a segment's own deviation fit.
+    """
+
+    def __init__(
+        self,
+        daily_order: int = 6,
+        weekly_order: int = 3,
+        alpha: float = 0.003,
+        delta: float = 0.15,
+        deviation_alpha: float | None = None,
+        timezone: str = "America/Vancouver",
+        min_rows: int = 100,
+    ) -> None:
+        self.daily_order = daily_order
+        self.weekly_order = weekly_order
+        self.alpha = alpha
+        self.delta = delta
+        self.deviation_alpha = deviation_alpha
+        self.timezone = timezone
+        self.min_rows = min_rows
+
+    def _pipeline(self, alpha: float) -> Pipeline:
+        """Fresh unfitted harmonic pipeline with the given L1 penalty."""
+        return HarmonicTraversal(
+            daily_order=self.daily_order,
+            weekly_order=self.weekly_order,
+            alpha=alpha,
+            delta=self.delta,
+            timezone=self.timezone,
+        )._pipeline()
+
+    def fit(self, links: pd.DataFrame) -> PooledHarmonicTraversal:
+        """Fit segment levels, the shared shape and optional deviations.
+
+        Parameters
+        ----------
+        links : pandas.DataFrame
+            Training links with ``segment_key``, ``scheduled_departure`` and
+            positive ``traversal_seconds``.
+
+        Returns
+        -------
+        PooledHarmonicTraversal
+            Fitted model.
+        """
+        log_minutes = np.log(links["traversal_seconds"].to_numpy(dtype=float) / 60)
+        segments = links["segment_key"].to_numpy()
+        self.levels_ = pd.Series(log_minutes).groupby(segments).median()
+        residual = log_minutes - self.levels_.reindex(segments).to_numpy()
+        times = links[["scheduled_departure"]]
+        self.shared_ = self._pipeline(self.alpha).fit(times, residual)
+        self.deviations_: dict[str, Pipeline] = {}
+        if self.deviation_alpha is not None:
+            remaining = residual - self.shared_.predict(times)
+            for key, positions in links.groupby("segment_key").indices.items():
+                if len(positions) < self.min_rows:
+                    continue
+                self.deviations_[key] = self._pipeline(self.deviation_alpha).fit(
+                    times.iloc[positions], remaining[positions]
+                )
+        return self
+
+    def predict(self, requests: pd.DataFrame) -> np.ndarray:
+        """Predict traversal seconds per request.
+
+        Parameters
+        ----------
+        requests : pandas.DataFrame
+            Requests with ``segment_key`` and ``scheduled_departure``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Seconds; NaN for segments unseen in training.
+        """
+        times = requests[["scheduled_departure"]]
+        log_minutes = requests["segment_key"].map(self.levels_).to_numpy(dtype=float)
+        log_minutes = log_minutes + self.shared_.predict(times)
+        for key, positions in requests.groupby("segment_key").indices.items():
+            if key in self.deviations_:
+                log_minutes[positions] += self.deviations_[key].predict(
+                    times.iloc[positions]
+                )
+        return 60 * np.exp(log_minutes)
+
+
 class ShuffledTargetTraversal:
     """Control: fit a model on traversals permuted within each segment.
 
@@ -321,7 +430,10 @@ def make_traversal_model(name: str, timezone: str) -> TraversalModel:
     Parameters
     ----------
     name : str
-        ``'segment_median'``, ``'calendar_median'`` or ``'harmonic_huber'``.
+        ``'segment_median'``, ``'calendar_median'``, ``'harmonic_huber'``,
+        ``'pooled_harmonic'`` (shared calendar shape) or
+        ``'pooled_harmonic_partial'`` (shared shape plus per-segment
+        deviations penalised at ``alpha=0.01``).
     timezone : str
         Calendar timezone.
 
@@ -341,4 +453,8 @@ def make_traversal_model(name: str, timezone: str) -> TraversalModel:
         return CalendarMedianTraversal(timezone=timezone)
     if name == "harmonic_huber":
         return HarmonicTraversal(timezone=timezone)
+    if name == "pooled_harmonic":
+        return PooledHarmonicTraversal(timezone=timezone)
+    if name == "pooled_harmonic_partial":
+        return PooledHarmonicTraversal(timezone=timezone, deviation_alpha=0.01)
     raise ValueError(f"Unknown traversal model {name!r}.")
