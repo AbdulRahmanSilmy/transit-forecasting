@@ -15,6 +15,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 | E004 | 2026-11-20 | 1fe6300 | H0 | dev: harmonic_huber + traversal diagnostics (a9a38c98ebe3421e8d0f8562c594fef5) | 134.5 (B0 166.2) | -31.7 [-38.8, -24.7] (-19.1%) | -2.5 vs B3_calendar_median | diagnostic; see H7 |
 | E005 | 2026-11-21 | 2ba991b | H4 | dev: pooled_harmonic (60dd6de41dd34ac1835385a63a510b98) | 165.1 (B0 166.2) | -1.0 [-7.3, +4.4] (-0.6%) | +28.1 vs B3_calendar_median | discard |
 | E006 | 2026-11-21 | 714ceff | H4 | dev: pooled_harmonic_partial (f4dabda4739742f99091f28fc7051fed) | 146.4 (B0 166.2) | -19.8 [-25.5, -14.1] (-11.9%) | +9.4 vs B3_calendar_median | discard; H4 refuted |
+| E007 | 2026-11-21 | 98ddf13 | H3 | dev: harmonic_recent_level (b57247076a5a43e2a2ad5ebf8d14b4d3) | 138.5 (B0 166.2) | -27.6 [-35.2, -20.1] (-16.6%) | +1.5 vs B3_calendar_median | discard; H3 refuted at this history length |
 
 ## Entries
 
@@ -115,7 +116,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Results (dev, 27,759 visits on 40 service days, the same rows as E003/E004; 0 unscorable for every method):
   - **Delay MAE:** B0 166.2 s, B2 240.5, B3 137.0, **pooled 165.1** (harmonic was 134.5 in E003/E004).
   - Pooled vs B0: −1.0 s [−7.3, +4.4], −0.6%, win rate 0.54. **+28.1 s vs B3.**
-  - **Bias:** pooled −98.9 s, vs B3 −54.7 s (harmonic about −55 s in E003).
+  - **Bias:** pooled −98.9 s, vs B3 −54.7 s (harmonic −70.8 s in E003; first written here as "about −55 s", corrected from MLflow during E007).
   - **By fold:** pooled is worse than B3 in all six (e.g. dev1 186.7 vs 158.1, dev4 161.0 vs 125.0, dev6 144.5 vs 118.2).
   - **By period:** am_peak 199.8 (B3 140.0), pm_peak 238.4 (B3 168.1); evening 99.8 is level with B3 (100.4).
   - **Traversal MAE:** pooled 38.4 s (bias −5.2) vs B3 35.5, harmonic 33.7 (E004).
@@ -147,6 +148,18 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Prediction before running: **inconclusive, within ±2 s of harmonic (134.5 s).** dev1–dev2 have only about 2–3 weeks of training, so the window covers most of it and the in-sample offset is about 0. Any gain should show in dev4–dev6. H2 (longer history), which the ticket calls the setting where this matters most, is blocked, so the expected effect is small. A real gain would also show as a smaller per-segment bias (see the E006 lesson).
 - Single run; no window or threshold tuning on dev.
 - Change: `RecentLevelTraversal` wrapper in `traversal_models.py`, registered as `harmonic_recent_level`; tests in `tests/unit/test_traversal_models.py`. No harness change.
+- Git: 98ddf13 (clean)   MLflow run: b57247076a5a43e2a2ad5ebf8d14b4d3
+- Results (dev, the same 27,759 visits; 0 unscorable):
+  - **Delay MAE:** **138.5 s** vs harmonic 134.5 (E003), B3 137.0, B0 166.2.
+  - vs B0: −27.6 s [−35.2, −20.1], −16.6%, win rate 0.62. **+1.5 s vs B3, +4.0 vs harmonic.**
+  - **By fold, vs harmonic (E003):** worse in all six, with the gap growing where the window holds less of the training data: dev1 152.3 vs 151.9, dev2 138.5 vs 136.9, dev3 126.2 vs 124.1, dev4 132.3 vs 127.3, dev5 158.2 vs 149.6, dev6 125.7 vs 119.6.
+  - **Bias:** delay −83.7 s vs harmonic −70.8 (E003). Traversal −2.4 s vs harmonic −1.2.
+  - **Traversal MAE:** 33.4 s, the best of any method so far (harmonic 33.7, B3 35.5). Better than B3 on 12 of 13 segments, e.g. seq 6 65.0 vs 75.3.
+- Sanity checks: leakage assertions passed; identical rows; shuffled control passed (239.6 vs B2 240.5).
+- Interpretation: **prediction failed in direction.** I expected small gains in later folds; instead later folds lose most. The recent median log residual is mostly negative: the median of right-skewed traversals sits below the Huber fit. So the offset makes the *typical* link more accurate (best traversal MAE) but lowers the *sum*, and delay is a sum of 13 links. This is the third result (with E006) where a model that improves traversal MAE but adds negative traversal bias loses on delay.
+- Verdict: **discard; H3 refuted at the current 2-month history.** The ticket expected it to matter most with longer history (H2, blocked). That case remains untested.
+- Stop rule: E005, E006 and E007 are three consecutive runs without beating the best baseline (B3), so the session stops here, per the skill. 3 of 10 scored runs used.
+- Next: proposed **H8** (RESEARCH.md backlog): make traversal forecasts *mean*-unbiased, since chained delay sums them. H6 (anchor, #14) attacks the larger part of the same bias, about −100 s at the first stop, but needs a harness change.
 
 <!-- Template for new entries:
 
