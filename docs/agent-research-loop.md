@@ -28,7 +28,7 @@ Steps 4–6 are fixed infrastructure the agent uses but doesn't change. Steps 1,
 
 ## Memory layer (state lives in files)
 
-- **`experiments/LOG.md`** (or CSV/Parquet ledger) — one row per run: git hash, hypothesis, config, metrics, verdict. Include negative results so dead ends aren't retried.
+- **`experiments/<study>/LOG.md`** — one row per run: git hash, hypothesis, config, metrics, verdict. Include negative results so dead ends aren't retried.
 - **`RESEARCH.md`** — current goal, success metric, open questions, ruled-out ideas. Edit this to steer the loop.
 - **One git commit per experiment** — any logged number is reproducible from its hash.
 
@@ -43,15 +43,19 @@ Steps 4–6 are fixed infrastructure the agent uses but doesn't change. Steps 1,
 
 **Stopping rules:** a run budget (e.g. 10 experiments), stop after N attempts with no improvement, and stop immediately on any sanity-check failure.
 
-## Applying it to this repo
+## How this repo implements it
 
-Already in place: backtests loading from the R2 Parquet archive; segment 4 delay models.
+| Piece | Where |
+|---|---|
+| Study charter, frozen definitions, success criterion, locked test | `experiments/<study>/RESEARCH.md` |
+| Experiment ledger (reasoning; cites MLflow run IDs) | `experiments/<study>/LOG.md` |
+| Harness contract and protected files | `experiments/<study>/HARNESS.md` |
+| Frozen harness | `experiments/hwy97_delay/evaluate.py` + `forecasting/forecasting/delay_forecast_eval.py` |
+| Run store (metrics, figures, predictions) | local MLflow in `data/mlflow/` (see the [README](../README.md#viewing-experiment-results-mlflow)) |
+| Agent rules | `AGENTS.md`, Research Loop section |
+| One iteration, step by step | the `research-loop` skill (`/research-loop` in Claude Code) |
+| Work queue and priority | GitHub project [Hwy 97 delay forecasting](https://github.com/users/AbdulRahmanSilmy/projects/3), issues labelled `study:<study>` |
 
-To add:
-
-1. Extract backtest logic from notebooks into one harness script with fixed splits and an MAE-by-horizon table.
-2. Add baselines and a leakage check.
-3. Add `RESEARCH.md`, the experiment log, and an AGENTS.md section describing the loop and the "don't edit the harness" rule.
-4. Optional: a Claude Code skill (`/experiment <hypothesis>`) for one full iteration, repeated with `/loop` within a budget.
+Tickets move `Todo` → `In Progress` → `Review` (the agent is finished) → `Done`. Only the owner moves a ticket to `Done`, after reviewing it.
 
 The harness is the part worth getting right first; the rest of the loop is only as good as it is.

@@ -84,7 +84,7 @@ On the locked test set, the candidate's paired MAE difference vs B0 has a day-cl
 
 ## Backlog (agent proposes, owner prioritises)
 
-Open items are tracked as GitHub issues: H6 #14, H7 #15, H2 #16, H4 #17, H3 #18, H5 #19. Locked test: #20. Data-truth work: #12 (position-based arrivals), #21 (untracked journeys).
+**Priority lives on the GitHub project [Hwy 97 delay forecasting](https://github.com/users/AbdulRahmanSilmy/projects/3)** (`Priority` field, P1 first, then board order), not in this table. Rows here are in ID order. Open items are tracked as GitHub issues: H6 #14, H7 #15, H2 #16, H4 #17, H3 #18, H5 #19. Locked test: #20. Data-truth work: #12 (position-based arrivals), #21 (untracked journeys).
 
 | ID | Hypothesis | Cheapest test | Status |
 |---|---|---|---|

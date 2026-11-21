@@ -7,14 +7,25 @@
 - Run project Python code, tests, and notebooks with the `transit_env` Conda environment.
 - Activate it with `conda activate transit_env`; for non-interactive commands, use `conda run -n transit_env <command>`.
 
+## Repository Map
+- `forecasting/`: analysis and modelling package (`forecasting/forecasting/`), with unit tests in `forecasting/tests/unit/`. Module map: the `forecasting-development` skill.
+- `data_ingestion/`: GTFS-Realtime ingestion service, MySQL storage and the R2 archive, with unit and integration tests under `data_ingestion/tests/`.
+- `experiments/<study>/`: research studies and their evaluation harnesses.
+- `notebooks/`: analysis notebooks; [notebooks/README.md](notebooks/README.md) says what each one is for.
+- `docs/`: workflow and analysis docs; start at [docs/README.md](docs/README.md).
+- `.github/skills/`: agent skills (symlinked into `.claude/skills/` for Claude Code).
+- `data/`: local snapshots, outputs and the MLflow store (ignored by Git).
+
 ## Testing
 - Prefer pytest for tests.
-- For local validation, prefer:
-	- `conda run -n transit_env pytest tests/unit -q`
-	- `conda run -n transit_env ./run_integration_tests.sh`
+- Run unit tests from each package's directory (running from the repo root fails on imports):
+	- `cd forecasting && conda run -n transit_env python -m pytest tests/unit -q`
+	- `cd data_ingestion && conda run -n transit_env python -m pytest tests/unit -q`
+- MySQL integration tests (Docker): `cd data_ingestion && ./run_integration_tests.sh`
 
 ## Research Loop
 - Research studies live in `experiments/<study>/` (`RESEARCH.md` charter, `LOG.md` ledger, `HARNESS.md` contract). Run iterations with the `research-loop` skill.
+- Work items live on the GitHub project [Hwy 97 delay forecasting](https://github.com/users/AbdulRahmanSilmy/projects/3), labelled `study:<study>`. Its `Priority` field (P1 first, then board order) sets the order. Move a ticket to `In Progress` when starting and to `Review` when finished; only the owner moves it to `Done`.
 - The evaluation harness, frozen definitions, success criteria and locked-test dates are owner-controlled: do not edit them without asking.
 - Never load, score or plot a study's locked-test period unless the owner explicitly approves it.
 - Log every scored run in `LOG.md`, including negative and inconclusive results.

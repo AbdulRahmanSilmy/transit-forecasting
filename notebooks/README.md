@@ -18,6 +18,19 @@ research workflows, not a deployed arrival-prediction service.
 | [segment_4_traversal_time_eda.ipynb](segment_4_traversal_time_eda.ipynb) | Which calendar and dynamic patterns should a segment 4 traversal-time model represent? | Separate offline full-cache timing EDA: eligibility/coverage, aggregation support, weekday/hour profiles, robust candidate episodes, residual drift and gap-preserving lag correlations. Recommends calendar-plus-dynamic-residual candidates and an as-of, chronological modelling methodology; no fitting or selected forecast horizon. |
 | [segment_4_harmonic_traversal_regression.ipynb](segment_4_harmonic_traversal_regression.ipynb) | Can a calendar-only harmonic model learn typical segment 4 traversal time without following isolated spikes? | Custom sklearn daily/weekly Fourier transformer, Huber-loss L1 regression via weighted Lasso, ordinary Lasso and median comparisons, chronological development/final blocks, spike-injection sensitivity, and saved recurring patterns/residuals. |
 
+### Route 97 delay forecasting study
+
+Route-wide delay forecasting for Route 97 (Highway 97, direction 0) has moved
+out of the notebooks into the research study in
+[experiments/hwy97_delay/](../experiments/hwy97_delay). Its frozen harness
+([HARNESS.md](../experiments/hwy97_delay/HARNESS.md)) **supersedes the
+notebooks' ad hoc evaluation code**. Fixed dev folds, a baseline ladder,
+leakage checks, a locked test and the MLflow run store make its results
+comparable across experiments. The segment 4 notebooks above remain the
+exploratory groundwork (prior evidence E000 in its
+[LOG](../experiments/hwy97_delay/LOG.md)). Results are in that log, not in
+notebook outputs.
+
 ## Recommended reading order
 
 1. Start with the speed-based congestion analysis to understand segment
