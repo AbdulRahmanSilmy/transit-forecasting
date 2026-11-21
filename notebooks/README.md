@@ -209,7 +209,7 @@ conda run --no-capture-output -n transit_env python -m forecasting.benchmark_dow
 
 It measures realtime database downloads and writes CSV/HTML results to
 `data/download_benchmarks/`; it excludes static GTFS downloading and snapshot
-serialization. See the [project README](../README.md) for its controls and
+serialization. See the [benchmark docs](../docs/download-benchmark.md) for its controls and
 detailed analysis assumptions.
 
 Validate package changes without querying the live database:
