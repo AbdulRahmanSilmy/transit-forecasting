@@ -14,6 +14,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 | E003 | 2026-11-20 | 5d9cfa5 | H1 | dev: harmonic_huber (98ca4b712d70439eaf1fde2a555d32fe) | 134.5 (B0 166.2) | -31.7 [-38.8, -24.7] (-19.1%) | -2.5 vs B3_calendar_median | keep; current baseline |
 | E004 | 2026-11-20 | 1fe6300 | H0 | dev: harmonic_huber + traversal diagnostics (a9a38c98ebe3421e8d0f8562c594fef5) | 134.5 (B0 166.2) | -31.7 [-38.8, -24.7] (-19.1%) | -2.5 vs B3_calendar_median | diagnostic; see H7 |
 | E005 | 2026-11-21 | 2ba991b | H4 | dev: pooled_harmonic (60dd6de41dd34ac1835385a63a510b98) | 165.1 (B0 166.2) | -1.0 [-7.3, +4.4] (-0.6%) | +28.1 vs B3_calendar_median | discard |
+| E006 | 2026-11-21 | 714ceff | H4 | dev: pooled_harmonic_partial (f4dabda4739742f99091f28fc7051fed) | 146.4 (B0 166.2) | -19.8 [-25.5, -14.1] (-11.9%) | +9.4 vs B3_calendar_median | discard; H4 refuted |
 
 ## Entries
 
@@ -128,6 +129,17 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Hypothesis: H4 refine. Per-segment deviations from the shared shape, shrunk towards it (L1 `alpha=0.01` vs `0.003` for the shape), keep the segment-specific peaks while borrowing strength for thin cells.
 - Prediction before running (declared in E005): delay MAE within ±1.5 s of harmonic (134.5 s), i.e. about 133–136 s. Not expected to beat B3 by a meaningful margin.
 - Change: none; `pooled_harmonic_partial` was committed with E005 (2ba991b).
+- Git: 714ceff (clean)   MLflow run: f4dabda4739742f99091f28fc7051fed
+- Results (dev, the same 27,759 visits; 0 unscorable):
+  - **Delay MAE:** B0 166.2 s, B3 137.0, **partial 146.4** (harmonic 134.5, pooled 165.1).
+  - Partial vs B0: −19.8 s [−25.5, −14.1], −11.9%, win rate 0.60. **+9.4 s vs B3**; loses to B3 in all six folds (dev1 163.7 vs 158.1 … dev4 141.6 vs 125.0).
+  - **Bias:** −84.8 s (B3 −54.7).
+  - **By period:** am_peak 175.5 (B3 140.0) and pm_peak 192.9 (B3 168.1) carry the loss. Early, midday and evening are level with B3.
+  - **Traversal MAE:** 35.0 s (bias −3.0), slightly better than B3 (35.5) but worse than harmonic (33.7). Better than B3 on 11 of 13 segments; worse on seq 10 (49.2 vs 43.2) and seq 14.
+- Sanity checks: leakage assertions passed; identical rows; shuffled control passed (239.6 vs B2 240.5).
+- Interpretation: **prediction failed** (expected 133–136 s). Shrinking segment shapes towards the shared shape still flattens the peaks of seq 6, 10 and 11 a little. A −3 s per-link traversal bias concentrated in peak hours becomes about −30 s of extra delay bias after 13 chained links. That's why a model that beats B3 on traversal MAE loses to it on delay MAE. For chained forecasts, **per-link bias at the same time of day matters more than per-link MAE**.
+- Verdict: **discard; H4 refuted on this route.** Per the pre-registration, no further variants. Every segment of Route 97 direction 0 has more than 1,200 dev traversals, so pooling has nothing to rescue. Harmonic per segment (E003) stays the baseline.
+- Next: H3 (#18). H6/H7 would act directly on the accumulated bias but need harness changes (see #14, #15).
 
 <!-- Template for new entries:
 
