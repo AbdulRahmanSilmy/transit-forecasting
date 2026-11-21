@@ -141,6 +141,13 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Verdict: **discard; H4 refuted on this route.** Per the pre-registration, no further variants. Every segment of Route 97 direction 0 has more than 1,200 dev traversals, so pooling has nothing to rescue. Harmonic per segment (E003) stays the baseline.
 - Next: H3 (#18). H6/H7 would act directly on the accumulated bias but need harness changes (see #14, #15).
 
+### E007: harmonic plus a trailing 14-day level offset (H3, #18)
+
+- Hypothesis: H3. A recent-level term tracks level changes without chasing incidents. Design: fit `harmonic_huber` on all training links, then scale each segment by `exp(median log residual)` over links in the last 14 days of training data (no offset if a segment has fewer than 30 recent links). The median ignores short incidents.
+- Prediction before running: **inconclusive, within ±2 s of harmonic (134.5 s).** dev1–dev2 have only about 2–3 weeks of training, so the window covers most of it and the in-sample offset is about 0. Any gain should show in dev4–dev6. H2 (longer history), which the ticket calls the setting where this matters most, is blocked, so the expected effect is small. A real gain would also show as a smaller per-segment bias (see the E006 lesson).
+- Single run; no window or threshold tuning on dev.
+- Change: `RecentLevelTraversal` wrapper in `traversal_models.py`, registered as `harmonic_recent_level`; tests in `tests/unit/test_traversal_models.py`. No harness change.
+
 <!-- Template for new entries:
 
 ### E0NN: <short title>

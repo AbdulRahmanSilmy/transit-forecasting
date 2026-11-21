@@ -368,6 +368,81 @@ class PooledHarmonicTraversal:
         return 60 * np.exp(log_minutes)
 
 
+class RecentLevelTraversal:
+    """Calendar model plus each segment's recent level offset (H3).
+
+    Fits ``base`` on all training links, then measures each segment's median
+    log residual ``log(actual / base prediction)`` over links whose scheduled
+    departure falls in the last ``window_days`` of the training data. The
+    median keeps short-lived incidents from moving the level. Predictions are
+    the base prediction times ``exp(offset)``. Segments with fewer than
+    ``min_links`` recent links get no offset.
+
+    Parameters
+    ----------
+    base : TraversalModel
+        Unfitted calendar model.
+    window_days : float, default 14
+        Trailing window, in days before the latest training departure.
+    min_links : int, default 30
+        Minimum recent links for a segment's offset.
+    """
+
+    def __init__(
+        self, base: TraversalModel, window_days: float = 14, min_links: int = 30
+    ) -> None:
+        self.base = base
+        self.window_days = window_days
+        self.min_links = min_links
+
+    def fit(self, links: pd.DataFrame) -> RecentLevelTraversal:
+        """Fit the base model and the recent per-segment offsets.
+
+        Parameters
+        ----------
+        links : pandas.DataFrame
+            Training links with ``segment_key``, ``scheduled_departure`` and
+            positive ``traversal_seconds``. Not modified.
+
+        Returns
+        -------
+        RecentLevelTraversal
+            Fitted model.
+        """
+        self.base.fit(links)
+        start = links["scheduled_departure"].max() - pd.Timedelta(days=self.window_days)
+        recent = links.loc[links["scheduled_departure"].gt(start)]
+        residual = np.log(
+            recent["traversal_seconds"].to_numpy(dtype=float)
+            / np.asarray(self.base.predict(recent), dtype=float)
+        )
+        summary = (
+            pd.Series(residual, index=recent.index)
+            .groupby(recent["segment_key"])
+            .agg(["median", "size"])
+        )
+        self.offsets_ = summary.loc[summary["size"].ge(self.min_links), "median"]
+        return self
+
+    def predict(self, requests: pd.DataFrame) -> np.ndarray:
+        """Predict base traversal seconds scaled by the segment's offset.
+
+        Parameters
+        ----------
+        requests : pandas.DataFrame
+            Requests accepted by the base model, with ``segment_key``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Seconds; NaN wherever the base model returns NaN.
+        """
+        offset = requests["segment_key"].map(self.offsets_).fillna(0.0)
+        return np.asarray(self.base.predict(requests), dtype=float) * np.exp(
+            offset.to_numpy(dtype=float)
+        )
+
+
 class ShuffledTargetTraversal:
     """Control: fit a model on traversals permuted within each segment.
 
@@ -433,7 +508,8 @@ def make_traversal_model(name: str, timezone: str) -> TraversalModel:
         ``'segment_median'``, ``'calendar_median'``, ``'harmonic_huber'``,
         ``'pooled_harmonic'`` (shared calendar shape) or
         ``'pooled_harmonic_partial'`` (shared shape plus per-segment
-        deviations penalised at ``alpha=0.01``).
+        deviations penalised at ``alpha=0.01``) or ``'harmonic_recent_level'``
+        (``harmonic_huber`` plus a trailing 14-day per-segment level offset).
     timezone : str
         Calendar timezone.
 
@@ -457,4 +533,6 @@ def make_traversal_model(name: str, timezone: str) -> TraversalModel:
         return PooledHarmonicTraversal(timezone=timezone)
     if name == "pooled_harmonic_partial":
         return PooledHarmonicTraversal(timezone=timezone, deviation_alpha=0.01)
+    if name == "harmonic_recent_level":
+        return RecentLevelTraversal(HarmonicTraversal(timezone=timezone))
     raise ValueError(f"Unknown traversal model {name!r}.")

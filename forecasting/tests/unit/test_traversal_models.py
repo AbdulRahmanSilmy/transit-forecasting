@@ -5,6 +5,8 @@ import pytest
 from forecasting.traversal_models import (
     HarmonicTraversal,
     PooledHarmonicTraversal,
+    RecentLevelTraversal,
+    SegmentMedianTraversal,
     ShuffledTargetTraversal,
     make_traversal_model,
 )
@@ -99,3 +101,47 @@ def test_pooled_models_are_registered(name, partial):
     model = make_traversal_model(name, TIMEZONE)
     assert isinstance(model, PooledHarmonicTraversal)
     assert (model.deviation_alpha is not None) is partial
+
+
+def _shift_recent(links, key, factor, days=14):
+    """Scale ``key``'s traversals in the last ``days`` of the frame."""
+    links = links.copy()
+    start = links["scheduled_departure"].max() - pd.Timedelta(days=days)
+    rows = links["segment_key"].eq(key) & links["scheduled_departure"].gt(start)
+    links.loc[rows, "traversal_seconds"] *= factor
+    return links
+
+
+def test_recent_level_follows_a_sustained_shift():
+    links = _shift_recent(_links({"A": (5.0, 1), "B": (5.0, 1)}), "A", 1.2)
+    original = links.copy()
+    model = RecentLevelTraversal(SegmentMedianTraversal()).fit(links)
+    pd.testing.assert_frame_equal(links, original)
+    requests = pd.concat([_requests("A", [12]), _requests("B", [12])])
+    base = SegmentMedianTraversal().fit(links).predict(requests)
+    adjusted = model.predict(requests)
+    # A's last two weeks run 20% slow; B is unchanged.
+    assert adjusted[0] == pytest.approx(300 * 1.2, rel=0.01)
+    assert adjusted[0] > base[0]
+    assert adjusted[1] == pytest.approx(base[1])
+
+
+def test_recent_level_ignores_a_one_day_incident():
+    links = _shift_recent(_links({"A": (5.0, 1)}), "A", 3.0, days=1)
+    model = RecentLevelTraversal(SegmentMedianTraversal()).fit(links)
+    assert model.predict(_requests("A", [12]))[0] == pytest.approx(300.0)
+
+
+def test_recent_level_needs_enough_recent_links():
+    links = _shift_recent(_links({"A": (5.0, 1)}), "A", 1.5)
+    model = RecentLevelTraversal(SegmentMedianTraversal(), min_links=10_000).fit(links)
+    assert model.offsets_.empty
+    assert model.predict(_requests("A", [12]))[0] == pytest.approx(
+        SegmentMedianTraversal().fit(links).predict(_requests("A", [12]))[0]
+    )
+
+
+def test_recent_level_model_is_registered():
+    model = make_traversal_model("harmonic_recent_level", TIMEZONE)
+    assert isinstance(model, RecentLevelTraversal)
+    assert isinstance(model.base, HarmonicTraversal)
