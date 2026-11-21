@@ -13,6 +13,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 | E002 | 2026-11-20 | 64f51eb | H1 | dev: harmonic_huber (f38bff5b31864f3497745333592f9ee2) | 134.4 (B0 166.1) | -31.7 [-38.8, -24.7] (-19.1%) | -2.6 vs B3_calendar_median | H1 confirmed; superseded by E003 |
 | E003 | 2026-11-20 | 5d9cfa5 | H1 | dev: harmonic_huber (98ca4b712d70439eaf1fde2a555d32fe) | 134.5 (B0 166.2) | -31.7 [-38.8, -24.7] (-19.1%) | -2.5 vs B3_calendar_median | keep; current baseline |
 | E004 | 2026-11-20 | 1fe6300 | H0 | dev: harmonic_huber + traversal diagnostics (a9a38c98ebe3421e8d0f8562c594fef5) | 134.5 (B0 166.2) | -31.7 [-38.8, -24.7] (-19.1%) | -2.5 vs B3_calendar_median | diagnostic; see H7 |
+| E005 | 2026-11-21 | 2ba991b | H4 | dev: pooled_harmonic (60dd6de41dd34ac1835385a63a510b98) | 165.1 (B0 166.2) | -1.0 [-7.3, +4.4] (-0.6%) | +28.1 vs B3_calendar_median | discard |
 
 ## Entries
 
@@ -109,6 +110,24 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Pre-declared follow-up (run only if E005 loses on segments with their own peaks): `pooled_harmonic_partial`, the same model plus per-segment deviations from the shared shape at L1 `alpha=0.01` (shared shape `0.003`). Predicted within ±1.5 s of harmonic delay MAE. No other variants or tuning.
 - Note: H6, H7, H2 and H5 (higher or equal priority) are blocked because they need harness changes (see their tickets), so H4 runs first.
 - Change: `PooledHarmonicTraversal` in `traversal_models.py`, registered as `pooled_harmonic` and `pooled_harmonic_partial`; unit tests in `tests/unit/test_traversal_models.py`. No harness change.
+- Git: 2ba991b (clean)   MLflow run: 60dd6de41dd34ac1835385a63a510b98
+- Results (dev, 27,759 visits on 40 service days, the same rows as E003/E004; 0 unscorable for every method):
+  - **Delay MAE:** B0 166.2 s, B2 240.5, B3 137.0, **pooled 165.1** (harmonic was 134.5 in E003/E004).
+  - Pooled vs B0: −1.0 s [−7.3, +4.4], −0.6%, win rate 0.54. **+28.1 s vs B3.**
+  - **Bias:** pooled −98.9 s, vs B3 −54.7 s (harmonic about −55 s in E003).
+  - **By fold:** pooled is worse than B3 in all six (e.g. dev1 186.7 vs 158.1, dev4 161.0 vs 125.0, dev6 144.5 vs 118.2).
+  - **By period:** am_peak 199.8 (B3 140.0), pm_peak 238.4 (B3 168.1); evening 99.8 is level with B3 (100.4).
+  - **Traversal MAE:** pooled 38.4 s (bias −5.2) vs B3 35.5, harmonic 33.7 (E004).
+  - **By segment (pooled vs B3):** much worse on seq 10 (61.6 vs 43.2), seq 11 (42.3 vs 33.1) and seq 6 (80.1 vs 75.3). Level or slightly better on seq 4, 8 and 9.
+- Sanity checks: leakage assertions passed; identical rows across methods; shuffled control passed (240.0 vs B2 240.5).
+- Interpretation: **the prediction held, and the loss was larger than expected.** One shared shape can't represent peaks that only some segments have (seq 6, 10, 11 slow down in the peaks; others barely do). Those segments are under-predicted at the same times in the same journeys, so the errors add up along the chain. A 4.7 s traversal loss becomes a 30 s delay loss, with a bias of −99 s. Low-support segments (the reason for pooling) carry almost no rows on this route.
+- Verdict: **discard.** Running the pre-declared partial-pooling follow-up (E006) because the loss is concentrated on segments with their own peaks.
+
+### E006: pooled harmonic with per-segment deviations (H4 follow-up, #17)
+
+- Hypothesis: H4 refine. Per-segment deviations from the shared shape, shrunk towards it (L1 `alpha=0.01` vs `0.003` for the shape), keep the segment-specific peaks while borrowing strength for thin cells.
+- Prediction before running (declared in E005): delay MAE within ±1.5 s of harmonic (134.5 s), i.e. about 133–136 s. Not expected to beat B3 by a meaningful margin.
+- Change: none; `pooled_harmonic_partial` was committed with E005 (2ba991b).
 
 <!-- Template for new entries:
 
