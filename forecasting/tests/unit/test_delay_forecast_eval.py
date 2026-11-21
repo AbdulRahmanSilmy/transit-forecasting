@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from forecasting.anchor_models import CalendarMedianAnchor, make_anchor_model
 from forecasting.delay_forecast_display import make_run_figures
 from forecasting.delay_forecast_eval import (
     B0,
@@ -16,7 +17,9 @@ from forecasting.delay_forecast_eval import (
     check_test_access,
     day_bootstrap_delta,
     evaluate_block,
+    first_stop_departures,
     fold_cutoff,
+    log_row,
     prepare_origin_visits,
     run_study,
     score_predictions,
@@ -41,11 +44,17 @@ def _journey(
     origin_delay=0,
     middle_delay=None,
     first_id=0,
+    departure_lag=0,
 ):
-    """Origin, optional middle and final publications for a 4-stop journey."""
+    """Origin, optional middle and final publications for a 4-stop journey.
+
+    ``departure_lag`` makes the bus leave the first stop that many seconds
+    late while the origin publication still reports ``origin_delay``.
+    """
     first_departure = pd.Timestamp(first_departure, tz="UTC")
     scheduled = [first_departure + pd.Timedelta(seconds=s) for s in SCHEDULE]
-    actual_arrival, actual_departure = [pd.NaT], [first_departure]
+    actual_arrival = [pd.NaT]
+    actual_departure = [first_departure + pd.Timedelta(seconds=departure_lag)]
     for k, traversal in enumerate(traversals):
         arrival = actual_departure[-1] + pd.Timedelta(seconds=traversal)
         actual_arrival.append(arrival)
@@ -107,9 +116,13 @@ def _journey(
     return rows
 
 
-def _updates(days=10, start="2026-10-01"):
-    """Three journeys per service day; the 15:00 UTC trip is 60 s slower per link."""
+def _updates(days=10, start="2026-10-01", departure_lags=None):
+    """Three journeys per service day; the 15:00 UTC trip is 60 s slower per link.
+
+    ``departure_lags`` optionally maps a UTC hour to its first-stop departure lag.
+    """
     rows = []
+    lags = departure_lags or {}
     for day in pd.date_range(start, periods=days, freq="D"):
         for hour, extra in ((15, 60), (19, 0), (22, 0)):
             rows += _journey(
@@ -117,6 +130,7 @@ def _updates(days=10, start="2026-10-01"):
                 day + pd.Timedelta(hours=hour),
                 traversals=tuple(t + extra for t in (280, 330, 290)),
                 first_id=len(rows),
+                departure_lag=lags.get(hour, 0),
             )
     frame = pd.DataFrame(rows)
     for column in ("feed_timestamp", "arrival_time", "departure_time"):
@@ -442,3 +456,124 @@ def test_traversal_scores_match_known_errors():
     dwell = traversal["dwell_summary"].set_index("rule")
     assert dwell.loc["model", "MAE_s"] == pytest.approx(0)
     assert dwell.loc[B0, "MAE_s"] == pytest.approx(30)  # scheduled 0 vs 20/40 s
+
+
+def test_first_stop_departures_measure_lag_and_drop_stale_reports():
+    updates = pd.DataFrame(_journey("a", "2026-10-01 15:00", departure_lag=90))
+    departures = first_stop_departures(_prepare(updates).visits, 10)
+    assert departures["departure_delay_seconds"].tolist() == [90.0]
+    # Drop stop 1 from the final publication: its last report is now the
+    # 150-minute-old origin prediction, which is stale.
+    final = updates["feed_timestamp"].eq(updates["feed_timestamp"].max())
+    stale = updates.loc[~(final & updates["stop_sequence"].eq(1))]
+    assert first_stop_departures(_prepare(stale).visits, 10).empty
+
+
+def test_first_stop_departures_skip_untracked_journeys():
+    # Journey "a" reports exactly 0 s everywhere (#21); its 0 s departure is
+    # not an observation and must not train the anchor.
+    untracked = _journey(
+        "a", "2026-10-01 15:00", traversals=(300, 300, 300), dwells=(0, 0)
+    )
+    tracked = _journey("b", "2026-10-01 19:00", departure_lag=90, first_id=1000)
+    departures = first_stop_departures(
+        _prepare(pd.DataFrame(untracked + tracked)).visits, 10
+    )
+    assert departures["trip_instance_key"].str.startswith("b|").all()
+    assert departures["departure_delay_seconds"].tolist() == [90.0]
+
+
+def test_learned_anchor_shifts_chained_methods_only():
+    config = _config()
+    prepared = _prepare(_updates(departure_lags={15: 120, 19: 30, 22: 30}))
+    kwargs = dict(block_start=date(2026, 10, 7), block_days=1, config=config, fold="f")
+    feed_rows, _ = evaluate_block(prepared, model_name="calendar_median", **kwargs)
+    learned_rows, _ = evaluate_block(
+        prepared, model_name="calendar_median", anchor_name="calendar_median", **kwargs
+    )
+    # B0 and B1 always use Transit BC's feed; the feed said 0 s at the origin.
+    for method in (B0, B1):
+        pd.testing.assert_series_equal(
+            feed_rows[f"pred_{method}"], learned_rows[f"pred_{method}"]
+        )
+    assert feed_rows[f"pred_{B1}"].eq(0).all()
+    # The calendar anchor learns each hour's lag (pooled fallback for thin cells)
+    # and shifts every chained forecast of the journey by exactly that amount.
+    shift = learned_rows["anchor_model_s"]
+    assert set(shift.round()) <= {120.0, 30.0}
+    for method in (B2, B3):
+        np.testing.assert_allclose(
+            learned_rows[f"pred_{method}"] - feed_rows[f"pred_{method}"], shift
+        )
+
+    def b3_mae(rows):
+        return (rows[f"pred_{B3}"] - rows["truth_delay_seconds"]).abs().mean()
+
+    assert b3_mae(learned_rows) < b3_mae(feed_rows)
+
+
+def test_learned_anchor_trains_only_on_departures_before_cutoff():
+    config = _config()
+    prepared = _prepare(_updates(departure_lags={15: 120}))
+    seen = []
+
+    class Recorder(CalendarMedianAnchor):
+        def fit(self, departures):
+            seen.append(departures)
+            return super().fit(departures)
+
+    rows, _ = evaluate_block(
+        prepared,
+        model_name="calendar_median",
+        block_start=date(2026, 10, 7),
+        block_days=1,
+        config=config,
+        fold="f",
+        anchor_name="calendar_median",
+        anchor_factory=lambda name, tz: Recorder(timezone=tz, min_count=1),
+    )
+    cutoff = fold_cutoff(date(2026, 10, 7), config)
+    assert seen[0]["available_at"].max() < cutoff
+    assert not set(rows["trip_instance_key"]) & set(seen[0]["trip_instance_key"])
+
+
+def test_run_study_records_anchor_and_log_row_names_it():
+    config = _config()
+    run = run_study(
+        config,
+        _updates(departure_lags={15: 120}),
+        model_name="calendar_median",
+        split="dev",
+        anchor="calendar_median",
+    )
+    assert run.info["anchor"] == "calendar_median"
+    assert "calendar_median anchor" in log_row(run, run_id="r", git_hash="abc")
+    default = run_study(config, _updates(), model_name="calendar_median", split="dev")
+    assert default.info["anchor"] == "feed"
+    assert "anchor_model_s" not in default.predictions
+
+
+def test_calendar_anchor_learns_hour_and_falls_back_to_pooled():
+    times = pd.to_datetime(
+        ["2026-10-05 15:00", "2026-10-06 15:00", "2026-10-05 22:00"], utc=True
+    )
+    departures = pd.DataFrame(
+        {
+            "stop_id": ["s1", "s1", "s1"],
+            "calendar_departure": times,
+            "departure_delay_seconds": [100.0, 120.0, 20.0],
+        }
+    )
+    model = CalendarMedianAnchor(min_count=1).fit(departures)
+    requests = pd.DataFrame(
+        {
+            "stop_id": ["s1", "s1", "other"],
+            "calendar_departure": pd.to_datetime(
+                ["2026-10-14 15:00", "2026-10-14 22:00", "2026-10-14 15:00"], utc=True
+            ),
+        }
+    )
+    # Wednesday has no weekday cell: stop x hour (110 s), then pooled for "other".
+    np.testing.assert_allclose(model.predict(requests), [110.0, 20.0, 100.0])
+    with pytest.raises(ValueError):
+        make_anchor_model("nope", "America/Vancouver")

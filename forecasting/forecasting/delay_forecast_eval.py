@@ -19,6 +19,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .anchor_models import FEED_ANCHOR, AnchorModel, make_anchor_model
 from .feed_clock import journey_timetable_offsets, timetable_offset_summary
 from .road_segment_congestion import _normalize_direction_ids, _require_columns
 from .traversal_models import (
@@ -41,6 +42,7 @@ REQUIRED_COLUMNS = (
     "departure_time",
 )
 REQUEST_COLUMNS = ("segment_key", "from_stop_id", "to_stop_id", "scheduled_departure")
+ANCHOR_REQUEST_COLUMNS = ("trip_instance_key", "stop_id", "calendar_departure")
 SKIPPED_OR_NO_DATA = (1, 2)
 CANCELLED_TRIP = (3, 7)
 B0 = "B0_transit_bc"
@@ -539,6 +541,7 @@ def prepare_origin_visits(
         max_age
     )
     untracked = _untracked_journeys(visits)
+    visits["untracked_journey"] = untracked
     visits["score_exclusion_reason"] = _first_reason(
         [
             ("anchor_stop", visits["is_first_stop"]),
@@ -738,6 +741,112 @@ def chain_delay_forecast(
     )
 
 
+def first_stop_departures(
+    visits: pd.DataFrame, max_final_report_age_minutes: float
+) -> pd.DataFrame:
+    """Observed first-stop departure delays usable to train an anchor model.
+
+    Keeps first-stop visits whose final departure report is fresh (published
+    at most ``max_final_report_age_minutes`` before the departure it reports),
+    on tracked (see ``untracked_journey``), non-cancelled, non-skipped
+    journeys with a consistent timetable clock.
+
+    Parameters
+    ----------
+    visits : pandas.DataFrame
+        Prepared visits from :func:`prepare_origin_visits`.
+    max_final_report_age_minutes : float
+        The study's stale-report threshold.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per journey: ``trip_instance_key``, ``stop_id``,
+        ``calendar_departure``, ``departure_delay_seconds`` (final departure
+        minus feed scheduled departure) and ``available_at`` (the final
+        report's publication time).
+    """
+    first = visits.loc[visits["is_first_stop"]]
+    age = first["final_departure_time"] - first["final_feed_timestamp"]
+    keep = (
+        first["final_departure_time"].notna()
+        & first["scheduled_departure"].notna()
+        & age.le(pd.Timedelta(minutes=max_final_report_age_minutes))
+        & ~first["timetable_clock_mismatch"].astype(bool)
+    )
+    if "untracked_journey" in first:
+        keep &= ~first["untracked_journey"].astype(bool)
+    if "final_schedule_relationship" in first:
+        keep &= ~first["final_schedule_relationship"].isin(SKIPPED_OR_NO_DATA)
+    if "final_trip_schedule_relationship" in first:
+        keep &= ~first["final_trip_schedule_relationship"].isin(CANCELLED_TRIP)
+    first = first.loc[keep]
+    return pd.DataFrame(
+        {
+            "trip_instance_key": first["trip_instance_key"],
+            "stop_id": first["stop_id"],
+            "calendar_departure": first["calendar_departure"],
+            "departure_delay_seconds": (
+                first["final_departure_time"] - first["scheduled_departure"]
+            ).dt.total_seconds(),
+            "available_at": first["final_feed_timestamp"],
+        }
+    ).reset_index(drop=True)
+
+
+def learned_anchor(
+    visits: pd.DataFrame,
+    eval_visits: pd.DataFrame,
+    *,
+    cutoff: pd.Timestamp,
+    anchor_name: str,
+    config: StudyConfig,
+    anchor_factory: Callable[[str, str], AnchorModel] = make_anchor_model,
+) -> pd.Series:
+    """Fit an anchor model before the cutoff and predict evaluation journeys.
+
+    Parameters
+    ----------
+    visits : pandas.DataFrame
+        All prepared visits (training source).
+    eval_visits : pandas.DataFrame
+        Visits of the block's evaluation journeys.
+    cutoff : pandas.Timestamp
+        Training cutoff; only departures reported before it train.
+    anchor_name : str
+        Registered anchor model name.
+    config : StudyConfig
+        Study configuration.
+    anchor_factory : callable, optional
+        ``(name, timezone) -> AnchorModel``; injectable for tests.
+
+    Returns
+    -------
+    pandas.Series
+        Predicted first-stop departure delay (seconds) per evaluation
+        ``trip_instance_key``.
+
+    Raises
+    ------
+    AssertionError
+        If a leakage guardrail fails.
+    """
+    departures = first_stop_departures(visits, config.max_final_report_age_minutes)
+    train = departures.loc[departures["available_at"].lt(cutoff)]
+    journeys = eval_visits["trip_instance_key"].unique()
+    # Guardrails 1 and 3 for the anchor: no outcome after the cutoff, disjoint journeys.
+    assert train["available_at"].max() < cutoff
+    assert not set(train["trip_instance_key"]).intersection(journeys)
+    requests = eval_visits.loc[
+        eval_visits["is_first_stop"], list(ANCHOR_REQUEST_COLUMNS)
+    ].reset_index(drop=True)
+    model = anchor_factory(anchor_name, config.timezone).fit(train)
+    predicted = np.asarray(model.predict(requests.drop(columns="trip_instance_key")))
+    if predicted.shape != (len(requests),):
+        raise ValueError(f"Anchor {anchor_name} returned {predicted.shape} values.")
+    return pd.Series(predicted, index=requests["trip_instance_key"].to_numpy())
+
+
 def fold_cutoff(start: date, config: StudyConfig) -> pd.Timestamp:
     """Return the UTC training cutoff for an evaluation block.
 
@@ -767,6 +876,8 @@ def evaluate_block(
     config: StudyConfig,
     fold: str,
     model_factory: Callable[[str, str], TraversalModel] = make_traversal_model,
+    anchor_name: str = FEED_ANCHOR,
+    anchor_factory: Callable[[str, str], AnchorModel] = make_anchor_model,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit on links available before the cutoff and forecast one block.
 
@@ -786,12 +897,20 @@ def evaluate_block(
         Label stored on every row.
     model_factory : callable, optional
         ``(name, timezone) -> TraversalModel``; injectable for tests.
+    anchor_name : str, default 'feed'
+        Chain anchor for B2, B3 and the candidate. ``'feed'`` uses Transit
+        BC's earliest first-stop estimate; any other name is an anchor model
+        (see :mod:`forecasting.anchor_models`) trained before the cutoff. B0
+        and B1 always use the feed.
+    anchor_factory : callable, optional
+        ``(name, timezone) -> AnchorModel``; injectable for tests.
 
     Returns
     -------
     visit_rows : pandas.DataFrame
         One row per scored visit with truth, ``pred_<method>`` columns and
-        breakdown fields.
+        breakdown fields. With a learned anchor, ``anchor_model_s`` holds the
+        journey's predicted first-stop departure delay.
     link_rows : pandas.DataFrame
         One row per segment traversal of the block's scored journeys with a
         valid observed outcome: ``actual_traversal_s``, ``actual_dwell_s``
@@ -845,6 +964,27 @@ def evaluate_block(
     rows["fold"] = fold
     rows[f"pred_{B0}"] = scored["origin_arrival_delay"].astype(float)
     rows[f"pred_{B1}"] = scored["anchor_delay_seconds"]
+    chain_visits = eval_visits
+    if anchor_name != FEED_ANCHOR:
+        anchor = learned_anchor(
+            visits,
+            eval_visits,
+            cutoff=cutoff,
+            anchor_name=anchor_name,
+            config=config,
+            anchor_factory=anchor_factory,
+        )
+        journey_anchor = eval_visits["trip_instance_key"].map(anchor).astype(float)
+        first_departure = eval_visits["trip_instance_key"].map(
+            eval_visits.loc[eval_visits["is_first_stop"]].set_index(
+                "trip_instance_key"
+            )["scheduled_departure"]
+        )
+        chain_visits = eval_visits.assign(
+            anchor_time=first_departure
+            + pd.to_timedelta(journey_anchor.to_numpy(), unit="s")
+        )
+        rows["anchor_model_s"] = journey_anchor.loc[scored.index]
     methods: dict[str, TraversalModel] = {
         B2: model_factory("segment_median", config.timezone),
         B3: model_factory("calendar_median", config.timezone),
@@ -893,7 +1033,7 @@ def evaluate_block(
         traversal = np.asarray(model.predict(requests), dtype=float)
         if traversal.shape != (len(requests),):
             raise ValueError(f"{name} returned {traversal.shape} predictions.")
-        chained = chain_delay_forecast(eval_visits, eval_links, traversal, dwell)
+        chained = chain_delay_forecast(chain_visits, eval_links, traversal, dwell)
         rows[f"pred_{name}"] = chained.loc[scored.index]
         links_out[f"trav_{name}"] = traversal
     # Observed traversals must be valid outcomes (not stale, skipped, etc.).
@@ -1264,6 +1404,7 @@ def run_study(
     approved: bool = False,
     today: date | None = None,
     model_factory: Callable[[str, str], TraversalModel] = make_traversal_model,
+    anchor: str = FEED_ANCHOR,
 ) -> StudyRun:
     """Run the development folds or the locked test for one candidate.
 
@@ -1283,6 +1424,8 @@ def run_study(
         Override for the test-period check.
     model_factory : callable, optional
         Traversal model factory; injectable for tests.
+    anchor : str, default 'feed'
+        Chain anchor for B2, B3 and the candidate (see :func:`evaluate_block`).
 
     Returns
     -------
@@ -1344,6 +1487,7 @@ def run_study(
             config=config,
             fold=label,
             model_factory=model_factory,
+            anchor_name=anchor,
         )
         for label, start, days in blocks
     ]
@@ -1356,6 +1500,7 @@ def run_study(
     info = {
         "split": split,
         "model": model_name,
+        "anchor": anchor,
         "blocks": [
             {
                 "fold": label,
@@ -1416,10 +1561,12 @@ def log_row(
     baselines = summary[[B1, B2, B3]]
     best = baselines.idxmin()
     delta_best = summary[method] - baselines.min()
+    anchor = run.info.get("anchor", FEED_ANCHOR)
+    anchor_note = "" if anchor == FEED_ANCHOR else f" + {anchor} anchor"
     today = datetime.now(datetime_timezone.utc).date()
     return (
         f"| {log_id or 'E0NN'} | {today} | {git_hash} | {hypothesis or 'H?'} "
-        f"| {run.info['split']}: {method} ({run_id}) "
+        f"| {run.info['split']}: {method}{anchor_note} ({run_id}) "
         f"| {summary[method]:.1f} (B0 {summary[B0]:.1f}) "
         f"| {paired['delta_MAE_s']:+.1f} [{paired['ci_low_s']:+.1f}, "
         f"{paired['ci_high_s']:+.1f}] ({paired['relative_change']:+.1%}) "

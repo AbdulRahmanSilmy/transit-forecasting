@@ -7,7 +7,7 @@ The harness is the loop's verifier. Once the owner has approved it, it is **prot
 - `experiments/hwy97_delay/config.json`: dataset window, fold dates, locked-test dates, holidays, stale-report threshold
 - `forecasting/forecasting/delay_forecast_display.py`: standard run figures
 
-Candidate models live in `forecasting/forecasting/traversal_models.py`, and agents change them freely (register new names in `make_traversal_model`).
+Candidate models live in `forecasting/forecasting/traversal_models.py`, and agents change them freely (register new names in `make_traversal_model`). Candidate **anchor** models (first-stop departure delay) live in `forecasting/forecasting/anchor_models.py` (register in `make_anchor_model`).
 
 ## CLI
 
@@ -17,6 +17,8 @@ conda run -n transit_env python experiments/hwy97_delay/evaluate.py --model harm
 ```
 
 Without the approval flag, `--split test` refuses to run. Pass `--hypothesis H1 --log-id E002` to tag the run and pre-fill its LOG row.
+
+`--anchor` (default `feed`, Transit BC's earliest first-stop estimate) swaps the chain anchor $d_0$ of **B2, B3 and the candidate** for an anchor model trained per fold on observed first-stop departure delays: fresh final reports only (same stale rule as truth), published before the cutoff, from journeys disjoint from the block. The model sees only origin-time fields (first `stop_id`, its `calendar_departure`). **B0 and B1 always keep the feed anchor.** Predictions gain an `anchor_model_s` column, and the anchor is recorded as an MLflow param and tag (added for H6, owner-approved).
 
 ## Run tracking (MLflow)
 

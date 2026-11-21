@@ -179,6 +179,15 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Verdict: **keep (truth definition).** All dev numbers from E008 on use it; E003–E007 differ by at most 0.1 s, so their comparisons stand. Harmonic (E008: 134.6 s) remains the baseline.
 - Next: H6 (#14) needs the owner to approve its harness change; otherwise H8 (#25), judged on per-segment × hour traversal bias.
 
+### E009: learned first-stop anchor (H6, #14)
+
+- Hypothesis: H6. First-stop departure delay has a recurring calendar pattern, so a learned anchor (first stop × weekday × hour median of observed departure delay, trained per fold before the cutoff) lowers delay MAE versus Transit BC's earliest estimate, which is 0 s for 99.6% of journeys.
+- Harness change approved by the owner (2026-11-21, "start working on H6"): opt-in `--anchor`, default `feed` reproduces E008. B0/B1 keep the feed anchor; B2, B3 and the candidate use the learned one. Training departures use the stale rule and exclude untracked journeys (#21).
+- Diagnostic before running (E008 dev predictions, no new scoring): harmonic's delay bias is not a constant anchor offset. It is −44 s at stop 2, about −37 s at stops 3–6 and grows to about −100 s at stops 11–14. Fresh first-stop departures run a median 61 s late. A constant +40 s shift of E008 harmonic would cut MAE by only about 3 s; +60 s by about 1 s.
+- Prediction before running: **small gain at best.** The learned anchor shifts forecasts by roughly +50 to +90 s, which overshoots stops 2–6 (bias turning positive) and helps stops 9–14. Harmonic delay MAE 130–136 s (E008: 134.6), overall bias −20 to +10 s (E008: −71.2). B3 moves similarly, so harmonic vs B3 stays within ±2 s of −2.5. The ticket's success bar (beating −19.1% vs B0 with most folds improving) is met only if the calendar variation in the anchor adds more than the constant shift. Single run, no tuning.
+- Change: `anchor_models.py` (`CalendarMedianAnchor`, `make_anchor_model`), `first_stop_departures` and `learned_anchor` in the harness, `--anchor` in `evaluate.py`; unit tests.
+- Git: <pending>   MLflow run: <pending>
+
 <!-- Template for new entries:
 
 ### E0NN: <short title>

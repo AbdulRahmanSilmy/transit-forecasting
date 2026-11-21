@@ -82,6 +82,12 @@ def main(argv: list[str] | None = None) -> None:
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", required=True)
+    parser.add_argument(
+        "--anchor",
+        default="feed",
+        help="Chain anchor for B2, B3 and the candidate: 'feed' (Transit BC's "
+        "earliest estimate, default) or an anchor model, e.g. calendar_median.",
+    )
     parser.add_argument("--split", choices=["dev", "test"], default="dev")
     parser.add_argument("--i-have-owner-approval", action="store_true")
     parser.add_argument("--no-write", action="store_true", help="Skip saving outputs.")
@@ -107,15 +113,20 @@ def main(argv: list[str] | None = None) -> None:
             model_name=args.model,
             split=args.split,
             approved=args.i_have_owner_approval,
+            anchor=args.anchor,
         )
 
     git_hash = _git("rev-parse", "--short", "HEAD")
     dirty = bool(_git("status", "--porcelain"))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    run_id = f"{stamp}_{args.model}_{args.split}"
+    anchor_tag = "" if args.anchor == "feed" else f"_anchor-{args.anchor}"
+    run_id = f"{stamp}_{args.model}{anchor_tag}_{args.split}"
     metrics = run.metrics
     with pd.option_context("display.width", 200, "display.max_columns", 20):
-        print(f"\nRun {run_id}  git {git_hash}{' (DIRTY)' if dirty else ''}")
+        print(
+            f"\nRun {run_id}  anchor {args.anchor}  git {git_hash}"
+            f"{' (DIRTY)' if dirty else ''}"
+        )
         print(
             f"Scored rows: {metrics['primary_rows']:,} on {metrics['primary_days']} "
             f"service days (holiday rows scored separately: {metrics['holiday_rows']:,})"
@@ -190,6 +201,7 @@ def main(argv: list[str] | None = None) -> None:
                     metrics=metrics,
                     params={
                         "model": args.model,
+                        "anchor": args.anchor,
                         "split": args.split,
                         "config": config.to_dict(),
                     },
@@ -198,6 +210,7 @@ def main(argv: list[str] | None = None) -> None:
                         "git_dirty": str(dirty),
                         "split": args.split,
                         "model": args.model,
+                        "anchor": args.anchor,
                         "hypothesis": args.hypothesis,
                         "log_id": args.log_id,
                         "locked_test": str(args.split == "test"),

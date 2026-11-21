@@ -24,7 +24,7 @@ Scope: repeated patterns only. Anomalous delays (incidents, detours) stay in the
 | Scheduled allowance `S_k` | From origin-time feed fields only: `(A - D)` at `t0` for both endpoints. Never the latest publication |
 | Traversal `T_k` | Upstream departure to downstream arrival (excludes upstream dwell), as in the harmonic notebook |
 | Dwell `W_k` | **Not modelled.** Fixed rule (see Open decisions); default is the per-stop training median |
-| Anchor `d_0` | Transit BC's earliest estimate at the journey's **first** stop. All accumulated change after the anchor comes from our model |
+| Anchor `d_0` | Transit BC's earliest estimate at the journey's **first** stop. All accumulated change after the anchor comes from our model. Since H6 (owner-approved 2026-11-21), `--anchor <model>` may replace it for B2, B3 and the candidate with an anchor model trained per fold; the default (`feed`) is unchanged and B0/B1 always use the feed (see HARNESS.md) |
 | Candidate forecast | $\hat d_k = d_0 + \sum_{j \le k} (\hat T_j + \hat W_j - S_j)$ |
 
 Anchoring on Transit BC's first-stop estimate is deliberate. Both methods start from the same information, so any difference measures only whether our traversal dynamics propagate delay better.
