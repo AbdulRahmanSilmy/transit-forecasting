@@ -18,6 +18,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 | E007 | 2026-11-21 | 98ddf13 | H3 | dev: harmonic_recent_level (b57247076a5a43e2a2ad5ebf8d14b4d3) | 138.5 (B0 166.2) | -27.6 [-35.2, -20.1] (-16.6%) | +1.5 vs B3_calendar_median | discard; H3 refuted at this history length |
 | E008 | 2026-11-22 | 7e8ec57 | #21 | dev: harmonic_huber (9e031ab3b21441eb9a4bc84b5cb3a5fa) | 134.6 (B0 166.3) | -31.7 [-38.9, -24.8] (-19.1%) | -2.5 vs B3_calendar_median | keep; untracked journeys excluded, baseline unchanged |
 | E009 | 2026-11-22 | b838ef7 | H6 | dev: harmonic_huber + calendar_median anchor (17781bc9f5d145fe93d8558d478515ee) | 136.3 (B0 166.3) | -30.0 [-38.0, -21.9] (-18.0%) | -4.6 vs B3_calendar_median | discard; bias removed (+2.8 s) but MAE +1.7 vs E008 |
+| E010 | 2026-11-22 | 7980583 | #12 | dev: harmonic_huber (20ccac3e2f11424598521a00fc921fe5) | 134.6 (B0 166.3) | -31.7 [-38.8, -25.0] (-19.1%) | -1.8 vs B3_calendar_median | keep; stale first-stop departures train link 1 (+1,297 links), new reference baseline |
 
 ## Entries
 
@@ -202,6 +203,28 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
   2. **Most of the early bias builds up along the chain, not at the anchor.** Harmonic's bias falls from −44 s at stop 2 to about −100 s at stop 14. That roughly matches the per-link mean biases: dwell rule −4.0 s × 12 stops plus traversal −1.3 s × 13 links ≈ −65 s. A single anchor shift can't fix a bias that grows with stop number. It trades early-stop error for late-stop error.
 - Verdict: **discard (calendar-median anchor); H6 refuted in this form.** Keep the `--anchor` option (default `feed`) for future anchor models. Harmonic with the feed anchor (E008: 134.6 s) stays the baseline.
 - Next: proposed **H9** (dwell mean bias, needs a harness change) and H8 (#25, traversal mean bias) attack the growing part of the bias. A refined anchor would need training data free of the stale-report selection, e.g. implied departures from fresh stop-2 arrivals.
+
+### E010: stale first-stop departures train the first link (truth fix)
+
+- Purpose: owner-approved harness fix (2026-11-21). The stale-report rule also dropped training links whose **upstream** departure report was stale. At the first stop, that removed about 40% of journeys from stop 1 → 2 training, mostly on-time leavers.
+- Diagnostic before the change (dev window, not a scored run): vehicle positions as an independent check. Departure from stop k = first ping past k (bracketed by the previous ping, gaps ≤ 60 s); arrival = first ping `STOPPED_AT` k or past k.
+  - **Method check, fresh reports:** arrivals agree with vehicles within 30 s / 60 s in 97% / 99.9% (n = 36,252); departures 88% / 98% (n = 38,136); stop-1 departures 52% / 88% (median feed − vehicle −28 s).
+  - **Stale stop-1 departures** (1,312; 99.8% report exactly 0 s): vehicles show 99% left between −60 and +120 s (median 24 s late); the 0 s value is within 60 s of the vehicle in 91%, at least as good as fresh stop-1 reports. **Wrongly dropped.**
+  - **Stale reports at stops 2–14** (318 arrivals, 296 departures; about 0.8%): only 53 each have pings, and **none** is within 60 s of the vehicle (median error about 26 min, some about 1 h, likely the #13 trip-label offset). Even the 0 s ones are wrong. **Correctly dropped.**
+- Change: in `prepare_origin_visits`, the stale rule no longer applies to the upstream departure when it is the journey's first stop. Scored visits are unchanged (they only check the arrival report). Unit test added.
+- Prediction before running: training links +about 1,280 (`stale_final_report` 1,567 → about 290), and stop 1 → 2 traversal-scoring rows 1,285 → about 2,150. Scored delay rows unchanged (27,742). On-time leavers take slightly less time on that link (stop-2 delay minus departure delay: median 66 s vs 73 s), so link-1 forecasts drop by a few seconds and every chained forecast moves slightly earlier. Delay bias becomes 2–5 s more negative, and harmonic delay MAE changes by −1 to +3 s (E008: 134.6). This is a correctness fix; keep it whatever the score.
+- Git: 7980583 (clean)   MLflow run: 20ccac3e2f11424598521a00fc921fe5
+- Audit: training links 38,596 → **39,893** (+1,297); `stale_final_report` among training links 1,567 → 270. Scored visits unchanged (39,916 eligible, 235 stale).
+- Results (dev, the same **27,742** visits as E008; 0 unscorable):
+  - **Delay MAE:** B0 166.3 s, B2 240.8 (E008: 240.4), B3 **136.4** (137.1), **harmonic 134.6** (134.6).
+  - Harmonic vs B0: −31.7 s [−38.8, −25.0], −19.1%, win rate 0.64. **−1.8 s vs B3** (E008: −2.5).
+  - **By fold (harmonic / B3):** dev1 152.1 / 159.7, dev2 136.5 / 143.1, dev3 124.5 / 124.4, dev4 127.4 / 124.5, dev5 150.2 / 152.3, dev6 119.4 / 117.8. Harmonic moved by at most 0.6 s per fold.
+  - **Bias:** harmonic −74.0 s (E008: −71.2), B3 −58.9 (−55.1).
+  - **Traversal:** scored links 26,800 → 27,703. Stop 1 → 2 (seq 2) rows 1,285 → 2,168; its MAE: harmonic 34.4 s (35.1), B3 37.6 (39.7). Overall harmonic 33.7 s (bias −1.0).
+- Sanity checks: leakage assertions passed; identical rows; shuffled control passed (240.1 vs B2 240.8).
+- Interpretation: **prediction held.** The row counts landed as predicted (+1,297 links, seq 2 at 2,168 rows). Bias moved 2.8 s earlier (predicted 2–5 s), and harmonic delay MAE didn't change (predicted −1 to +3 s). B3 gained 0.7 s. The stop 1 → 2 model now learns from on-time leavers too and scores better on that link. The score barely moves because the early bias that remains comes from the anchor, which is out of scope, and from per-link mean bias (H8, H9).
+- Verdict: **keep (truth fix).** E010 replaces E008 as the reference baseline: harmonic 134.6 s, B3 136.4 s.
+- Next: H8 (#25) or H9 (mean dwell, needs a harness change). Both are measured against E010.
 
 <!-- Template for new entries:
 
