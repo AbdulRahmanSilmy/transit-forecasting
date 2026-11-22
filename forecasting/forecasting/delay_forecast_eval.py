@@ -232,6 +232,41 @@ def _first_reason(
     return reasons
 
 
+def _untracked_journeys(visits: pd.DataFrame) -> pd.Series:
+    """Flag visits of journeys whose final reported delays are all exactly 0 s.
+
+    A tracked bus essentially never reports exactly 0 s at every stop, so such
+    a journey carries only schedule-only estimates (e.g. the 2026-11-01 feed
+    outage) and has no observed outcome (issue #21).
+
+    Parameters
+    ----------
+    visits : pandas.DataFrame
+        One row per stop visit with ``trip_instance_key``,
+        ``final_arrival_time`` and ``final_arrival_delay``, and optionally
+        ``final_departure_time`` and ``final_departure_delay``.
+
+    Returns
+    -------
+    pandas.Series
+        Boolean, aligned with ``visits``. A delay counts only where its event
+        time is present; a journey with no such delay is not flagged.
+    """
+    reported = []
+    for kind in ("arrival", "departure"):
+        delay, time = f"final_{kind}_delay", f"final_{kind}_time"
+        if delay in visits and time in visits:
+            values = pd.to_numeric(visits[delay], errors="coerce")
+            reported.append(values.where(visits[time].notna()))
+    delays = pd.concat(reported, axis=1)
+    any_reported = delays.notna().any(axis=1)
+    any_nonzero = (delays.notna() & delays.ne(0)).any(axis=1)
+    journey = visits["trip_instance_key"]
+    has_report = any_reported.groupby(journey).transform("any")
+    has_nonzero = any_nonzero.groupby(journey).transform("any")
+    return (has_report & ~has_nonzero).astype(bool)
+
+
 def prepare_origin_visits(
     trip_updates: pd.DataFrame,
     *,
@@ -253,6 +288,9 @@ def prepare_origin_visits(
     unless that report was published more than
     ``max_final_report_age_minutes`` before the arrival it describes: such a
     report is an un-updated prediction, so the visit is excluded as stale.
+    A journey whose final reported arrival and departure delays are all
+    exactly 0 s is untracked (schedule-only estimates, issue #21); all its
+    visits and links are excluded as ``untracked_journey``.
     Event times are never shifted. Each journey's timetable offset (start
     descriptor minus first-stop feed schedule, in whole hours; see
     :mod:`forecasting.feed_clock`) is recorded. With
@@ -500,11 +538,13 @@ def prepare_origin_visits(
     stale_arrival = (visits["final_arrival_time"] - visits["final_feed_timestamp"]).gt(
         max_age
     )
+    untracked = _untracked_journeys(visits)
     visits["score_exclusion_reason"] = _first_reason(
         [
             ("anchor_stop", visits["is_first_stop"]),
             ("missing_anchor", visits["anchor_time"].isna()),
             ("schedule_clock_mismatch", clock_mismatch),
+            ("untracked_journey", untracked),
             (
                 "missing_origin_report",
                 visits["origin_arrival_time"].isna()
@@ -555,6 +595,7 @@ def prepare_origin_visits(
     links["train_exclusion_reason"] = _first_reason(
         [
             ("schedule_clock_mismatch", clock_mismatch.loc[links.index]),
+            ("untracked_journey", untracked.loc[links.index]),
             ("cancelled_trip", cancelled.loc[links.index]),
             ("skipped_or_no_data", skipped.loc[links.index] | upstream_skipped),
             ("missing_scheduled_departure", links["scheduled_departure"].isna()),

@@ -210,6 +210,26 @@ def test_stale_final_report_is_not_used_as_truth():
     assert links[4] == "stale_final_report"
 
 
+def test_journey_with_every_final_delay_zero_is_untracked():
+    # Journey "a" runs exactly to schedule, as a schedule-only feed reports it.
+    untracked = _journey(
+        "a", "2026-10-01 15:00", traversals=(300, 300, 300), dwells=(0, 0)
+    )
+    tracked = _journey("b", "2026-10-01 19:00", first_id=len(untracked))
+    prepared = _prepare(pd.DataFrame(untracked + tracked))
+    visits = prepared.visits
+    reasons = visits.set_index(["trip_id", "stop_sequence"])["score_exclusion_reason"]
+    assert reasons.loc["a"].loc[[2, 3, 4]].eq("untracked_journey").all()
+    assert reasons.loc["b"].loc[[2, 3, 4]].eq("included").all()
+    links = prepared.links
+    is_a = links["trip_instance_key"].str.startswith("a|")
+    assert links.loc[is_a, "train_exclusion_reason"].eq("untracked_journey").all()
+    assert links.loc[~is_a, "train_exclusion_reason"].eq("included").all()
+    audit = prepared.audit.set_index(["stage", "reason"])["count"]
+    assert audit[("scored_visits", "untracked_journey")] == 3
+    assert audit[("training_links", "untracked_journey")] == 3
+
+
 def test_arrivals_after_the_last_publication_are_unfinished():
     updates = pd.DataFrame(_journey("a", "2026-10-01 15:00", middle_delay=60))
     updates = updates.loc[updates["feed_timestamp"].lt(updates["feed_timestamp"].max())]

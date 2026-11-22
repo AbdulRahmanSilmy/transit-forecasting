@@ -19,7 +19,7 @@ Scope: repeated patterns only. Anomalous delays (incidents, detours) stay in the
 |---|---|
 | Prediction unit | One stop visit `(trip_instance_key, stop_sequence)` on a direction-0 journey |
 | Origin `t0` | The journey's **first** trip-update publication. `lead = final arrival_time - t0` is recorded for every row |
-| Truth | Final reported `arrival_delay` (latest publication). This is a feed proxy, not an independent measurement. If that report was published **more than 10 min before the arrival it reports**, it is an un-updated prediction: the visit is excluded as `stale_final_report` (≈3% of visits; also applied to both ends of training traversals). Approved by owner 2026-11-19 as an interim rule; a position-based truth is tracked in [issue #12](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/12) |
+| Truth | Final reported `arrival_delay` (latest publication). This is a feed proxy, not an independent measurement. If that report was published **more than 10 min before the arrival it reports**, it is an un-updated prediction: the visit is excluded as `stale_final_report` (≈3% of visits; also applied to both ends of training traversals). Approved by owner 2026-11-19 as an interim rule; a position-based truth is tracked in [issue #12](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/12). A journey whose final reported arrival and departure delays are **all exactly 0 s** is untracked (schedule-only estimates, e.g. all of 2026-11-01): all its visits and training links are excluded as `untracked_journey` (owner, 2026-11-21, [issue #21](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/21)) |
 | Comparator B0 (Transit BC) | `arrival_delay` for that stop in the latest publication at or before `t0` |
 | Scheduled allowance `S_k` | From origin-time feed fields only: `(A - D)` at `t0` for both endpoints. Never the latest publication |
 | Traversal `T_k` | Upstream departure to downstream arrival (excludes upstream dwell), as in the harmonic notebook |
@@ -75,7 +75,7 @@ On the locked test set, the candidate's paired MAE difference vs B0 has a day-cl
 - [x] Scope: **direction 0 only**. Direction 1 is out of scope for this study.
 - [x] Minimum effect size: **5% relative MAE reduction** vs B0 (revisable before the test is unlocked).
 - [x] Stale final reports (> 10 min before the reported arrival) are excluded from truth (2026-11-19, interim; see issue #12).
-- [ ] Untracked journeys (every final delay exactly 0 s, e.g. all of 2026-11-01): exclude? (#21)
+- [x] Untracked journeys (every final delay exactly 0 s, e.g. all of 2026-11-01) are excluded from scoring and training as `untracked_journey` (2026-11-21, #21).
 - [x] Clock handling (2026-11-19, owner-directed fix after investigation, [issue #13](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/13)):
   - Since Transit BC's restart after the 2026-11-01/02 outage, the feed labels vehicles with trips whose public timetable is **1 h later** than their movements.
   - Event times are physical: the header clock matches real time, and vehicle GPS is at the stop at the reported arrival time. So they are **never shifted**, and final reports remain valid truth.
@@ -84,7 +84,7 @@ On the locked test set, the candidate's paired MAE difference vs B0 has a day-cl
 
 ## Backlog (agent proposes, owner prioritises)
 
-**Priority lives on the GitHub project [Hwy 97 delay forecasting](https://github.com/users/AbdulRahmanSilmy/projects/3)** (`Priority` field, P1 first, then board order), not in this table. Rows here are in ID order. Open items are tracked as GitHub issues: H6 #14, H7 #15, H2 #16, H4 #17, H3 #18, H5 #19. Locked test: #20. Data-truth work: #12 (position-based arrivals), #21 (untracked journeys).
+**Priority lives on the GitHub project [Hwy 97 delay forecasting](https://github.com/users/AbdulRahmanSilmy/projects/3)** (`Priority` field, P1 first, then board order), not in this table. Rows here are in ID order. Open items are tracked as GitHub issues: H6 #14, H7 #15, H2 #16, H4 #17, H3 #18, H5 #19, H8 #25. Locked test: #20. Data-truth work: #12 (position-based arrivals), #21 (untracked journeys).
 
 | ID | Hypothesis | Cheapest test | Status |
 |---|---|---|---|
@@ -96,7 +96,7 @@ On the locked test set, the candidate's paired MAE difference vs B0 has a day-cl
 | H5 | Dwell median vs zero changes the conclusion | Ablation | open |
 | H7 | Chained delay error grows along the route, so by stops 13–14 our methods only match B0 despite traversal errors half of B0's (E004). Buses ahead of schedule hold at timepoints, so delay recovers toward the timetable. A recovery-aware chain (e.g. early arrivals clipped to the schedule at timepoints, or learned per-segment recovery) beats the plain sum | Clip predicted delay at timepoint stops to ≥ 0 (or learn a recovery fraction) and compare delay MAE by stop with E004 | open (proposed by agent) |
 | H6 | Departure delay at the first stop has a recurring pattern. All methods are biased early (−53 to −138 s, E001) because the anchor is Transit BC's 0-delay origin estimate | Learn a calendar median of first-stop departure delay as the anchor | open (proposed by agent) |
-| H8 | Chained delay sums traversals, so it needs **mean**-unbiased traversal forecasts. Median-type and log-space models under-predict sums of right-skewed traversals (E006, E007: better traversal MAE but more negative bias, worse delay MAE). A per-segment × hour retransformation correction (training mean of actual / predicted) lowers delay MAE | Harmonic × per-segment-hour smearing factor from training residuals vs harmonic; check traversal bias by segment-hour, not just MAE. No harness change needed | open (proposed by agent, E007; no ticket yet) |
+| H8 | Chained delay sums traversals, so it needs **mean**-unbiased traversal forecasts. Median-type and log-space models under-predict sums of right-skewed traversals (E006, E007: better traversal MAE but more negative bias, worse delay MAE). A per-segment × hour retransformation correction (training mean of actual / predicted) lowers delay MAE | Harmonic × per-segment-hour smearing factor from training residuals vs harmonic; check traversal bias by segment-hour, not just MAE. No harness change needed | open (proposed by agent, E007; #25) |
 
 ## Findings
 
