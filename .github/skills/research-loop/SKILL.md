@@ -1,6 +1,6 @@
 ---
 name: research-loop
-description: "Use when running one iteration of a research experiment under experiments/<study>/ (e.g. hwy97_delay): pick a hypothesis, implement a candidate, run the frozen evaluation harness on development folds, log the result and recommend the next step."
+description: "Use when running one iteration of a research experiment under experiments/<study>/ (e.g. hwy97_delay): pick a hypothesis, explore it with plots, implement a candidate, run the frozen evaluation harness on development folds, log the result and recommend the next step."
 ---
 
 # Research Loop: one iteration
@@ -16,13 +16,14 @@ Read all three before starting.
 ## Procedure
 
 1. **Pick** the next ticket from the GitHub project [Hwy 97 delay forecasting](https://github.com/users/AbdulRahmanSilmy/projects/3): open issues labelled `study:<study>` in `Todo`, highest `Priority` first (P1 > P2 > P3, ties in board order), unless the owner named one. List them with `gh project item-list 3 --owner AbdulRahmanSilmy --format json`. Move it to `In Progress`. Restate it as a falsifiable claim.
-2. **Predict** the expected direction and rough size of the effect, and write it in the new LOG entry *before* running.
-3. **Implement** the smallest change that tests it, in the package (`forecasting/forecasting/`). Add NumPy docstrings and focused unit tests. Follow `forecasting-development`.
-4. **Run** `cd forecasting && conda run -n transit_env python -m pytest tests/unit -q`, then (from the repo root) the harness on `--split dev --hypothesis H? --log-id E0NN`. Commit before the scored run so the log's git hash reproduces it. The run is logged to the local MLflow store (see HARNESS.md).
-5. **Check** the sanity outputs: leakage assertions, identical row counts, shuffled control. If any fail, stop and report. Do not interpret the scores.
-6. **Record** the LOG entry, citing the MLflow run ID. In the summary row and the entry, write the git hash and the MLflow run ID as links: `[<hash>](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/<hash>)` (push the commit) and `[<run_id>](http://127.0.0.1:5000/#/experiments/1/runs/<run_id>)`. Then include: results for every baseline, Δ vs B0 with CI, Δ vs best baseline, per-fold spread and verdict. Update the backlog status, and add new hypotheses the result suggests.
-7. **Decide**: keep / discard / refine / inconclusive. A Δ whose CI spans zero, or that is smaller than the fold-to-fold spread, is **inconclusive**, not a win.
-8. **Hand off**: comment on the ticket with the LOG entry ID, commit, MLflow run ID, headline numbers and verdict, then move it to `Review`. Never move tickets to `Done` or close them; the owner does that after reviewing.
+2. **Explore** with the `experiment-plots` skill before modelling: one plot at a time, look at each one and choose the next from what it shows, until the mechanism and the design are clear. Everything is logged to an MLflow exploration run; mark 2–4 key figures for the reviewer.
+3. **Predict** the expected direction and rough size of the effect, and write it in the new LOG entry *before* running.
+4. **Implement** the smallest change that tests it, in the package (`forecasting/forecasting/`). Add NumPy docstrings and focused unit tests. Follow `forecasting-development`.
+5. **Run** `cd forecasting && conda run -n transit_env python -m pytest tests/unit -q`, then (from the repo root) the harness on `--split dev --hypothesis H? --log-id E0NN`. Commit before the scored run so the log's git hash reproduces it. The run is logged to the local MLflow store (see HARNESS.md).
+6. **Check** the sanity outputs: leakage assertions, identical row counts, shuffled control. If any fail, stop and report. Do not interpret the scores.
+7. **Record** the LOG entry, citing the MLflow run ID and the exploration run ID, and embedding the key figures (`figures/<log_id>/…`). In the summary row and the entry, write the git hash and the MLflow run ID as links: `[<hash>](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/<hash>)` (push the commit) and `[<run_id>](http://127.0.0.1:5000/#/experiments/1/runs/<run_id>)`. Then include: results for every baseline, Δ vs B0 with CI, Δ vs best baseline, per-fold spread and verdict. Update the backlog status, and add new hypotheses the result suggests.
+8. **Decide**: keep / discard / refine / inconclusive. A Δ whose CI spans zero, or that is smaller than the fold-to-fold spread, is **inconclusive**, not a win.
+9. **Hand off**: comment on the ticket with the LOG entry ID, commit, MLflow run IDs (scored and exploration), headline numbers, verdict and the **key figures** embedded with captions (commit-pinned raw URLs; see `experiment-plots`). Add a line for the entry to the ticket body's **Experiment runs** section (create it if missing), linking the LOG.md heading on `explore_baseline_usecase`, the MLflow run and the commit, with headline numbers and verdict. In the LOG summary row, write the hypothesis as `H? ([#N](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/N))`. Then move the ticket to `Review`. Never move tickets to `Done` or close them; the owner does that after reviewing.
 
 ## Hard rules
 

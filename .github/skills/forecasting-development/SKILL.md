@@ -23,6 +23,7 @@ Modules ending in `_display` hold the Plotly figures for the matching analysis m
 | Data access | `backtest_data`, `backtest_cache`, `r2_archive`, `static_gtfs`, `benchmark_download_speed` | Load, cache and benchmark historical realtime data (R2 Parquet, MySQL, local snapshots) and static GTFS |
 | Feed utilities | `trip_updates`, `feed_clock` | Select and associate trip updates; measure the trip-label vs timetable clock offset (issue #13) |
 | Hwy 97 study harness (**protected**) | `delay_forecast_eval`, `delay_forecast_display`, `experiment_tracking` | Origin-time delay forecasting harness, its run figures and MLflow logging. Do not edit without owner approval (see `experiments/hwy97_delay/HARNESS.md`) |
+| Study exploration | `exploration_tracking` | Iterative exploratory-plot sessions logged to MLflow (`experiment-plots` skill); not part of the protected harness |
 | Study candidates | `traversal_models`, `harmonic_regression` | Traversal-time models for the harness (register in `make_traversal_model`); the calendar harmonic regressor they use |
 | Congestion | `road_segment_congestion`, `road_segment_delay_congestion`, `congestion_service`, `congestion_display`, `delay_congestion_display` | Speed- and delay-based segment congestion engines and maps |
 | Delay propagation | `delay_propagation`, `delay_propagation_display` | Whether segment delay anomalies stay local or spread |
