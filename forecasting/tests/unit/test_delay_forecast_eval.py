@@ -360,6 +360,89 @@ def test_score_uses_identical_rows_and_counts_unscorable():
     assert summary[B3] == 0
 
 
+def test_anchor_free_score_removes_only_the_anchor_error():
+    # Buses leave 90 s late; the chain starts from the feed's 0 s anchor.
+    truth = [100.0, 150.0, 120.0, 130.0, 110.0]
+    rows = pd.DataFrame(
+        {
+            "service_day": pd.to_datetime(["2026-10-01"] * 3 + ["2026-10-02"] * 2),
+            "fold": "f",
+            "stop_sequence": [2, 3, 2, 3, 2],
+            "lead_minutes": 130.0,
+            "scheduled_arrival": pd.to_datetime(["2026-10-01 15:00Z"] * 5),
+            "truth_delay_seconds": truth,
+            f"pred_{B0}": 0.0,
+            f"pred_{B1}": 0.0,
+            # Right about everything after departure, wrong by the anchor only.
+            f"pred_{B2}": [value - 90 for value in truth],
+            f"pred_{B3}": [value - 80 for value in truth],
+            "actual_departure_delay_s": [90.0, 90.0, 90.0, 90.0, np.nan],
+            "chain_anchor_delay_s": 0.0,
+        }
+    )
+    metrics = score_predictions(rows, config=_config(holidays=()), candidate=None)
+    anchor_free = metrics["anchor_free"]
+    assert anchor_free["rows"] == 4 and anchor_free["excluded_rows"] == 1
+    summary = anchor_free["summary"].set_index("method")
+    assert B0 not in summary.index
+    assert summary.loc[B2, "MAE_s"] == pytest.approx(0)
+    assert summary.loc[B3, "bias_s"] == pytest.approx(10)
+    # B1 from the actual departure: delay stays at 90 s.
+    expected_b1 = np.mean([abs(90 - value) for value in truth[:4]])
+    assert summary.loc[B1, "MAE_s"] == pytest.approx(expected_b1)
+    paired = anchor_free["paired_vs_B3"].set_index("method")
+    assert paired.loc[B2, "delta_MAE_s"] == pytest.approx(-10)
+    # The primary score is unchanged by the secondary one.
+    assert metrics["summary"].set_index("method").loc[B2, "MAE_s"] == pytest.approx(90)
+
+
+def test_actual_departure_uses_the_reported_delay_like_truth():
+    config = _config()
+    updates = _updates(days=10, departure_lags={15: 120, 19: 30, 22: 30})
+    # One journey's final stop-1 report carries a second clock: its time is
+    # 1 h early while its reported delay is the real one (Nov 2 restart case).
+    final = updates.groupby(["trip_id", "trip_start_timestamp"])[
+        "feed_timestamp"
+    ].transform("max")
+    target = (
+        updates["trip_id"].eq("t19")
+        & updates["trip_start_timestamp"].str.startswith("2026-10-08")
+        & updates["stop_sequence"].eq(1)
+        & updates["feed_timestamp"].eq(final)
+    )
+    assert target.sum() == 1
+    updates.loc[target, "departure_time"] -= pd.Timedelta(hours=1)
+    prepared = _prepare(updates)
+    rows, _ = evaluate_block(
+        prepared,
+        model_name="segment_median",
+        block_start=date(2026, 10, 8),
+        block_days=1,
+        config=config,
+        fold="f",
+    )
+    departures = rows.groupby("trip_instance_key")["actual_departure_delay_s"].first()
+    assert sorted(departures.round().tolist()) == [30.0, 30.0, 120.0]
+    assert rows["chain_anchor_delay_s"].eq(0).all()
+
+
+def test_run_study_reports_anchor_free_scores_and_log_row():
+    run = run_study(
+        _config(),
+        _updates(days=14, departure_lags={15: 120, 19: 30, 22: 30}),
+        model_name="harmonic_huber",
+        split="dev",
+    )
+    anchor_free = run.metrics["anchor_free"]
+    assert anchor_free["rows"] == run.metrics["primary_rows"]
+    assert anchor_free["excluded_rows"] == 0
+    scored = run.metrics["summary"].set_index("method")["MAE_s"]
+    free = anchor_free["summary"].set_index("method")["MAE_s"]
+    assert free["harmonic_huber"] < scored["harmonic_huber"]
+    assert set(anchor_free["paired_vs_B3"]["method"]) >= {"harmonic_huber", B2}
+    assert "anchor-free" in log_row(run, run_id="r", git_hash="abc")
+
+
 def test_day_bootstrap_ci_contains_point_estimate():
     rng = np.random.default_rng(0)
     rows = pd.DataFrame(

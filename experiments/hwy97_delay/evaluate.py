@@ -161,6 +161,23 @@ def main(argv: list[str] | None = None) -> None:
             .round(1)
             .to_string(index=False),
         )
+        anchor_free = metrics.get("anchor_free")
+        if anchor_free is not None:
+            print(
+                f"\nAnchor-free (secondary; actual first-stop departure as anchor, "
+                f"{anchor_free['rows']:,} rows, {anchor_free['excluded_rows']:,} "
+                "without a departure):\n",
+                anchor_free["summary"].round(1).to_string(index=False),
+            )
+            if len(anchor_free["paired_vs_B3"]):
+                print(
+                    "Anchor-free vs B3:\n",
+                    anchor_free["paired_vs_B3"].round(1).to_string(index=False),
+                )
+            print(
+                "Anchor-free MAE by fold:\n",
+                anchor_free["by_fold"].round(1).to_string(index=False),
+            )
         if metrics["control"] is not None:
             print("\nShuffled control:", metrics["control"])
             print("Criterion (development, indicative only):", metrics["criterion"])

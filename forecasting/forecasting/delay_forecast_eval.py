@@ -920,6 +920,10 @@ def evaluate_block(
         One row per scored visit with truth, ``pred_<method>`` columns and
         breakdown fields. With a learned anchor, ``anchor_model_s`` holds the
         journey's predicted first-stop departure delay.
+        ``actual_departure_delay_s`` (the journey's final reported first-stop
+        departure delay) and ``chain_anchor_delay_s`` (the anchor the
+        chained methods started from) are evaluation-only; they feed the
+        anchor-free score.
     link_rows : pandas.DataFrame
         One row per segment traversal of the block's scored journeys with a
         valid observed outcome: ``actual_traversal_s``, ``actual_dwell_s``
@@ -994,6 +998,35 @@ def evaluate_block(
             + pd.to_timedelta(journey_anchor.to_numpy(), unit="s")
         )
         rows["anchor_model_s"] = journey_anchor.loc[scored.index]
+    # Evaluation only, never a feature: the actual first-stop departure delay
+    # and the chain's anchor delay, for scoring with the anchor error removed.
+    first_stop = eval_visits.loc[eval_visits["is_first_stop"]].set_index(
+        "trip_instance_key"
+    )
+    chain_first = chain_visits.loc[chain_visits["is_first_stop"]].set_index(
+        "trip_instance_key"
+    )
+    # Like truth (the reported arrival_delay), use the reported departure_delay;
+    # time arithmetic is only a fallback. The two disagree by 1 h for a few
+    # Nov 2 journeys whose feed carried two clocks during the outage restart.
+    departure_delay = (
+        first_stop["final_departure_time"] - first_stop["scheduled_departure"]
+    ).dt.total_seconds()
+    if "final_departure_delay" in first_stop:
+        reported = first_stop["final_departure_delay"].astype(float)
+        departure_delay = reported.where(
+            reported.notna() & first_stop["final_departure_time"].notna(),
+            departure_delay,
+        )
+    chain_anchor = (
+        chain_first["anchor_time"] - chain_first["scheduled_departure"]
+    ).dt.total_seconds()
+    rows["actual_departure_delay_s"] = (
+        scored["trip_instance_key"].map(departure_delay).astype(float)
+    )
+    rows["chain_anchor_delay_s"] = (
+        scored["trip_instance_key"].map(chain_anchor).astype(float)
+    )
     methods: dict[str, TraversalModel] = {
         B2: model_factory("segment_median", config.timezone),
         B3: model_factory("calendar_median", config.timezone),
@@ -1130,6 +1163,79 @@ def _breakdown(
     return out.rename_axis(by.name).reset_index()
 
 
+def anchor_free_scores(
+    rows: pd.DataFrame,
+    methods: Sequence[str],
+    *,
+    candidate: str | None,
+    config: StudyConfig,
+) -> dict[str, Any] | None:
+    """Score chained methods as if every chain started at the actual departure.
+
+    The first-stop departure delay is out of the study's scope, but every
+    chained forecast inherits its anchor error. This secondary score removes
+    it: each chained prediction is shifted by ``chain_anchor_delay_s -
+    actual_departure_delay_s``, so only the delay accumulated after the first
+    stop is judged. B1 becomes "delay stays as at the actual departure". B0
+    (Transit BC's own per-stop estimate) is not chained and is excluded.
+
+    Parameters
+    ----------
+    rows : pandas.DataFrame
+        Primary scored rows with ``actual_departure_delay_s`` and
+        ``chain_anchor_delay_s``.
+    methods : sequence of str
+        Methods with ``pred_<method>`` columns.
+    candidate : str or None
+        Candidate method; paired against B3 when given.
+    config : StudyConfig
+        Bootstrap settings.
+
+    Returns
+    -------
+    dict or None
+        ``rows``, ``excluded_rows`` (no actual departure), ``summary``,
+        ``by_fold``, ``by_stop`` and ``paired_vs_B3`` (each chained method's
+        MAE minus B3's, with a service-day bootstrap CI); None if the rows
+        lack the departure columns.
+    """
+    if "actual_departure_delay_s" not in rows or "chain_anchor_delay_s" not in rows:
+        return None
+    known = (
+        rows["actual_departure_delay_s"].notna() & rows["chain_anchor_delay_s"].notna()
+    )
+    shifted = rows.loc[known].copy()
+    actual = shifted["actual_departure_delay_s"]
+    scored_methods = [method for method in methods if method != B0]
+    for method in scored_methods:
+        if method == B1:
+            shifted[f"pred_{B1}"] = actual
+        else:
+            shifted[f"pred_{method}"] = shifted[f"pred_{method}"] - (
+                shifted["chain_anchor_delay_s"] - actual
+            )
+    paired = []
+    for method in scored_methods:
+        if method in (B1, B3):
+            continue
+        delta, low, high = day_bootstrap_delta(
+            shifted, method, B3, reps=config.bootstrap_reps, seed=config.seed
+        )
+        paired.append(
+            {"method": method, "delta_MAE_s": delta, "ci_low_s": low, "ci_high_s": high}
+        )
+    return {
+        "rows": len(shifted),
+        "excluded_rows": int((~known).sum()),
+        "summary": _summary(shifted, scored_methods),
+        "by_fold": _breakdown(shifted, scored_methods, shifted["fold"].rename("fold")),
+        "by_stop": _breakdown(
+            shifted, scored_methods, shifted["stop_sequence"].rename("stop_sequence")
+        ),
+        "paired_vs_B3": pd.DataFrame(paired),
+    }
+
+
 def score_predictions(
     predictions: pd.DataFrame,
     *,
@@ -1151,8 +1257,9 @@ def score_predictions(
     -------
     dict
         ``coverage``, ``summary``, ``paired_vs_B0``, ``by_fold``, ``by_stop``,
-        ``by_lead``, ``by_period``, ``holidays``, ``control`` and
-        ``criterion`` entries (DataFrames or plain values).
+        ``by_lead``, ``by_period``, ``holidays``, ``anchor_free`` (see
+        :func:`anchor_free_scores`), ``control`` and ``criterion`` entries
+        (DataFrames or plain values).
     """
     methods = [column[5:] for column in predictions if column.startswith("pred_")]
     finite = pd.DataFrame(
@@ -1217,6 +1324,10 @@ def score_predictions(
     result["by_period"] = _breakdown(rows, methods, period)
     result["holidays"] = (
         _summary(holiday_rows, methods) if len(holiday_rows) else pd.DataFrame()
+    )
+    # Secondary metric (owner, 2026-11-22); the success criterion stays above.
+    result["anchor_free"] = anchor_free_scores(
+        rows, methods, candidate=candidate, config=config
     )
     result["control"] = None
     result["criterion"] = None
@@ -1572,11 +1683,17 @@ def log_row(
     delta_best = summary[method] - baselines.min()
     anchor = run.info.get("anchor", FEED_ANCHOR)
     anchor_note = "" if anchor == FEED_ANCHOR else f" + {anchor} anchor"
+    anchor_free = run.metrics.get("anchor_free")
+    anchor_free_note = ""
+    if anchor_free is not None and len(anchor_free["summary"]):
+        af = anchor_free["summary"].set_index("method")["MAE_s"]
+        if method in af:
+            anchor_free_note = f"; anchor-free {af[method]:.1f}"
     today = datetime.now(datetime_timezone.utc).date()
     return (
         f"| {log_id or 'E0NN'} | {today} | {git_hash} | {hypothesis or 'H?'} "
         f"| {run.info['split']}: {method}{anchor_note} ({run_id}) "
-        f"| {summary[method]:.1f} (B0 {summary[B0]:.1f}) "
+        f"| {summary[method]:.1f} (B0 {summary[B0]:.1f}{anchor_free_note}) "
         f"| {paired['delta_MAE_s']:+.1f} [{paired['ci_low_s']:+.1f}, "
         f"{paired['ci_high_s']:+.1f}] ({paired['relative_change']:+.1%}) "
         f"| {delta_best:+.1f} vs {best} | ? |"
