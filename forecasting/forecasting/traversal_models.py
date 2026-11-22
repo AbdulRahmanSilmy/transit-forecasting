@@ -443,6 +443,103 @@ class RecentLevelTraversal:
         )
 
 
+class ResidualHourCorrection:
+    """Calendar model plus an additive per-segment x hour residual mean (H8).
+
+    Fits ``base`` on all training links, then takes the in-sample residual
+    ``actual - base prediction`` of every link and averages it per segment and
+    local hour of the scheduled upstream departure. Each cell's mean is
+    shrunk towards its segment's mean residual,
+    ``(n * cell_mean + k * segment_mean) / (n + k)``, so thin cells borrow from
+    the segment. Predictions are the base prediction plus that correction,
+    which makes them mean-unbiased per cell on the training data. Unlike a
+    ratio (smearing) factor, the correction can be negative, so cells the base
+    model over-predicts move down.
+
+    Parameters
+    ----------
+    base : TraversalModel
+        Unfitted calendar model.
+    timezone : str, default "America/Vancouver"
+        Calendar timezone for the hour.
+    shrinkage : float, default 30
+        Pseudo-count ``k`` pulling a cell's mean towards its segment's mean.
+    """
+
+    def __init__(
+        self,
+        base: TraversalModel,
+        timezone: str = "America/Vancouver",
+        shrinkage: float = 30.0,
+    ) -> None:
+        self.base = base
+        self.timezone = timezone
+        self.shrinkage = shrinkage
+
+    def _hours(self, frame: pd.DataFrame) -> np.ndarray:
+        """Local hour of the scheduled upstream departure."""
+        return _local_clock(
+            frame["scheduled_departure"], self.timezone
+        ).dt.hour.to_numpy()
+
+    def fit(self, links: pd.DataFrame) -> ResidualHourCorrection:
+        """Fit the base model and the shrunk cell corrections.
+
+        Parameters
+        ----------
+        links : pandas.DataFrame
+            Training links with ``segment_key``, ``scheduled_departure`` and
+            positive ``traversal_seconds``. Not modified.
+
+        Returns
+        -------
+        ResidualHourCorrection
+            Fitted model.
+        """
+        self.base.fit(links)
+        residual = links["traversal_seconds"].to_numpy(dtype=float) - np.asarray(
+            self.base.predict(links), dtype=float
+        )
+        frame = pd.DataFrame(
+            {
+                "segment_key": links["segment_key"].to_numpy(),
+                "hour": self._hours(links),
+                "residual": residual,
+            }
+        ).dropna(subset=["residual"])
+        self.segment_means_ = frame.groupby("segment_key")["residual"].mean()
+        cells = frame.groupby(["segment_key", "hour"])["residual"].agg(["mean", "size"])
+        prior = self.segment_means_.reindex(cells.index.get_level_values(0)).to_numpy()
+        self.corrections_ = (cells["size"] * cells["mean"] + self.shrinkage * prior) / (
+            cells["size"] + self.shrinkage
+        )
+        return self
+
+    def predict(self, requests: pd.DataFrame) -> np.ndarray:
+        """Predict base traversal seconds plus the cell correction.
+
+        Parameters
+        ----------
+        requests : pandas.DataFrame
+            Requests accepted by the base model, with ``segment_key`` and
+            ``scheduled_departure``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Seconds; NaN wherever the base model returns NaN. Unseen cells use
+            the segment's mean residual; unseen segments get no correction.
+        """
+        index = pd.MultiIndex.from_arrays(
+            [requests["segment_key"].to_numpy(), self._hours(requests)]
+        )
+        correction = self.corrections_.reindex(index).to_numpy(dtype=float)
+        segment = requests["segment_key"].map(self.segment_means_).to_numpy(dtype=float)
+        correction = np.where(np.isnan(correction), segment, correction)
+        correction = np.nan_to_num(correction, nan=0.0)
+        return np.asarray(self.base.predict(requests), dtype=float) + correction
+
+
 class ShuffledTargetTraversal:
     """Control: fit a model on traversals permuted within each segment.
 
@@ -509,7 +606,9 @@ def make_traversal_model(name: str, timezone: str) -> TraversalModel:
         ``'pooled_harmonic'`` (shared calendar shape) or
         ``'pooled_harmonic_partial'`` (shared shape plus per-segment
         deviations penalised at ``alpha=0.01``) or ``'harmonic_recent_level'``
-        (``harmonic_huber`` plus a trailing 14-day per-segment level offset).
+        (``harmonic_huber`` plus a trailing 14-day per-segment level offset)
+        or ``'harmonic_residual_hour'`` (``harmonic_huber`` plus an additive
+        per-segment x hour training-residual mean, shrinkage 30).
     timezone : str
         Calendar timezone.
 
@@ -535,4 +634,6 @@ def make_traversal_model(name: str, timezone: str) -> TraversalModel:
         return PooledHarmonicTraversal(timezone=timezone, deviation_alpha=0.01)
     if name == "harmonic_recent_level":
         return RecentLevelTraversal(HarmonicTraversal(timezone=timezone))
+    if name == "harmonic_residual_hour":
+        return ResidualHourCorrection(HarmonicTraversal(timezone=timezone), timezone)
     raise ValueError(f"Unknown traversal model {name!r}.")

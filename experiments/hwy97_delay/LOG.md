@@ -308,6 +308,14 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
 - Verdict: **keep.** E014 is the anchor-free reference: harmonic 116.3 s, B3 119.7 s. Primary reference unchanged (E010).
 - Next: H8 (E015), judged first on anchor-free delay MAE and traversal bias, per the E011 pre-registration.
 
+### E015: harmonic plus per-segment × hour residual correction (H8, #25)
+
+- Hypothesis: H8, as designed in the E011 exploration. Traversal bias that repeats by segment × hour (e.g. peak-hour links → 2 too slow, → 8 too fast) can be learned from training residuals; removing it makes per-link forecasts mean-unbiased and lowers the delay accumulated along the route.
+- Design (fixed before scoring): `ResidualHourCorrection(harmonic_huber)`, registered as `harmonic_residual_hour`. Correction per cell = training mean of (actual − harmonic in-sample prediction) per segment × local hour of the scheduled departure, shrunk towards the segment mean with pseudo-count k = 30: (n·cell + 30·segment)/(n + 30). Additive, so it can be negative. Single run, no tuning of k.
+- Prediction (pre-registered in E011, before any H8 code; anchor-free reference is E014): traversal MAE 33.7 → 32.5–33.5 s, with the stable peak cells (→ 2, → 8) close to 0; scored delay MAE −2 to +2 s vs E010 (134.6 s); anchor-free delay MAE −1 to −4 s vs E014 (harmonic 116.3 s). The unstable links (→ 9, → 10) stay biased.
+- Caveat known in advance: harmonic is fit on the same links, so in-sample residuals only capture what harmonic's smooth daily shape can't represent; bias that comes from drift between training and the block (link → 6 shrinking, → 9/10 swinging) isn't in them.
+- Git: <pending>   MLflow run: <pending>
+
 <!-- Template for new entries:
 
 ### E0NN: <short title>
