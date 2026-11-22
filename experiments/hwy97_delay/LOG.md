@@ -161,6 +161,13 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Stop rule: E005, E006 and E007 are three consecutive runs without beating the best baseline (B3), so the session stops here, per the skill. 3 of 10 scored runs used.
 - Next: proposed **H8** (RESEARCH.md backlog): make traversal forecasts *mean*-unbiased, since chained delay sums them. H6 (anchor, #14) attacks the larger part of the same bias, about −100 s at the first stop, but needs a harness change.
 
+### E008: baseline rerun with untracked journeys excluded (#21)
+
+- Purpose: owner decision on #21. Journeys whose final reported delays are all exactly 0 s are untracked and excluded from scoring and training (`untracked_journey`). Rerun the current baseline (harmonic, E003) and the ladder on the new truth.
+- Prediction before running: dev rows drop by a few hundred visits (93 of 3,336 journeys are untracked, and the stale-report rule already removes many of their visits). B0 loses rows where it is exactly right (0 vs 0), so B0 MAE rises by about 1–4 s. Harmonic and B3 change by less than 2 s. The ranking (harmonic ≈ B3 < B0) stays the same.
+- Change: `untracked_journey` exclusion in `prepare_origin_visits` (harness change approved by the owner on #21), with a unit test.
+- Git: be28f72   MLflow run: <pending>
+
 <!-- Template for new entries:
 
 ### E0NN: <short title>
