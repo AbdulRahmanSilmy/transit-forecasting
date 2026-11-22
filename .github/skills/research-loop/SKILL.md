@@ -22,7 +22,7 @@ Read all three before starting.
 5. **Check** the sanity outputs: leakage assertions, identical row counts, shuffled control. If any fail, stop and report. Do not interpret the scores.
 6. **Record** the LOG entry, citing the MLflow run ID. In the summary row and the entry, write the git hash and the MLflow run ID as links: `[<hash>](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/<hash>)` (push the commit) and `[<run_id>](http://127.0.0.1:5000/#/experiments/1/runs/<run_id>)`. Then include: results for every baseline, Δ vs B0 with CI, Δ vs best baseline, per-fold spread and verdict. Update the backlog status, and add new hypotheses the result suggests.
 7. **Decide**: keep / discard / refine / inconclusive. A Δ whose CI spans zero, or that is smaller than the fold-to-fold spread, is **inconclusive**, not a win.
-8. **Hand off**: comment on the ticket with the LOG entry ID, commit, MLflow run ID, headline numbers and verdict, then move it to `Review`. Never move tickets to `Done` or close them; the owner does that after reviewing.
+8. **Hand off**: comment on the ticket with the LOG entry ID, commit, MLflow run ID, headline numbers and verdict. Add a line for the entry to the ticket body's **Experiment runs** section (create it if missing), linking the LOG.md heading on `explore_baseline_usecase`, the MLflow run and the commit, with headline numbers and verdict. In the LOG summary row, write the hypothesis as `H? ([#N](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/N))`. Then move the ticket to `Review`. Never move tickets to `Done` or close them; the owner does that after reviewing.
 
 ## Hard rules
 
