@@ -8,11 +8,13 @@
 - Activate it with `conda activate transit_env`; for non-interactive commands, use `conda run -n transit_env <command>`.
 
 ## Repository Map
-- `forecasting/`: analysis and modelling package (`forecasting/forecasting/`), with unit tests in `forecasting/tests/unit/`. Module map: the `forecasting-development` skill.
+- `forecasting/`: analysis and modelling package (`forecasting/forecasting/`), with unit tests in `forecasting/tests/unit/`. Module map: [forecasting/README.md](forecasting/README.md).
 - `data_ingestion/`: GTFS-Realtime ingestion service, MySQL storage and the R2 archive, with unit and integration tests under `data_ingestion/tests/`.
 - `experiments/<study>/`: research studies and their evaluation harnesses.
 - `notebooks/`: analysis notebooks; [notebooks/README.md](notebooks/README.md) says what each one is for.
 - `docs/`: workflow and analysis docs; start at [docs/README.md](docs/README.md).
+  - Before analysing realtime data, read [docs/gtfs-rt-data.md](docs/gtfs-rt-data.md) (columns, time zones, known quirks); add newly found quirks there.
+  - Pi deployment and ingestion operations: [docs/operations.md](docs/operations.md).
 - `.github/skills/`: agent skills (symlinked into `.claude/skills/` for Claude Code).
 - `data/`: local snapshots, outputs and the MLflow store (ignored by Git).
 

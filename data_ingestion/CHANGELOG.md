@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and this project uses Semantic Versioning.
 
+## [0.4.0] - 2026-11-19
+
+### Added
+- Added `python -m data_ingestion.nightly` and the `archive` Compose service, which export each complete UTC day to R2 daily at 10:00 UTC (the feed's quietest time), catch up missed days, and retry failed runs.
+- Added `python -m data_ingestion.retention` with `check`, `prune`, `compact`, and `drop-backup`. Days are removed from MySQL only when their R2 file exists and its row count matches; `compact` rebuilds the tables with only the retention window via `RENAME TABLE` and keeps a backup until `drop-backup --yes`.
+- Added `ARCHIVE_RETAIN_DAYS` to enable nightly pruning and `ARCHIVE_RUN_AT_UTC` to set the run time.
+- Added an `EXTRAS` build argument to the Dockerfile for optional dependency groups.
+
+### Changed
+- `data_ingestion.archive.run_export` now holds the multi-table export loop used by the CLI and the nightly service.
+- The Compose `integration_tests` service runs every integration test.
+
+## [0.3.0] - 2026-11-18
+
+### Added
+- Added `python -m data_ingestion.archive`, which copies complete UTC days of the realtime tables to Cloudflare R2 as zstd Parquet files (`archive/<table>/date=YYYY-MM-DD/data.parquet`), sorted by route and direction, and verifies each upload's row count.
+- Added the optional `archive` dependency group (`duckdb`).
+
+## [0.2.1] - 2026-11-17
+
+### Fixed
+- Capped the ingestion log file with a rotating handler (4 x 10 MB) so the long-running service no longer grows it without bound.
+- Capped Docker `json-file` logs for every Compose service at 3 x 10 MB.
+- Disabled MySQL binary logging, which this single-node setup does not use and which retained several GB of insert history on the Raspberry Pi.
+
 ## [0.2.0] - 2026-06-13
 
 ### Added
