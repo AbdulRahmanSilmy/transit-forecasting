@@ -20,7 +20,7 @@ Read all three before starting.
 3. **Implement** the smallest change that tests it, in the package (`forecasting/forecasting/`). Add NumPy docstrings and focused unit tests. Follow `forecasting-development`.
 4. **Run** `cd forecasting && conda run -n transit_env python -m pytest tests/unit -q`, then (from the repo root) the harness on `--split dev --hypothesis H? --log-id E0NN`. Commit before the scored run so the log's git hash reproduces it. The run is logged to the local MLflow store (see HARNESS.md).
 5. **Check** the sanity outputs: leakage assertions, identical row counts, shuffled control. If any fail, stop and report. Do not interpret the scores.
-6. **Record** the LOG entry, citing the MLflow run ID: results for every baseline, Δ vs B0 with CI, Δ vs best baseline, per-fold spread and verdict. Update the backlog status, and add new hypotheses the result suggests.
+6. **Record** the LOG entry, citing the MLflow run ID. In the summary row and the entry, write the git hash and the MLflow run ID as links: `[<hash>](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/<hash>)` (push the commit) and `[<run_id>](http://127.0.0.1:5000/#/experiments/1/runs/<run_id>)`. Then include: results for every baseline, Δ vs B0 with CI, Δ vs best baseline, per-fold spread and verdict. Update the backlog status, and add new hypotheses the result suggests.
 7. **Decide**: keep / discard / refine / inconclusive. A Δ whose CI spans zero, or that is smaller than the fold-to-fold spread, is **inconclusive**, not a win.
 8. **Hand off**: comment on the ticket with the LOG entry ID, commit, MLflow run ID, headline numbers and verdict, then move it to `Review`. Never move tickets to `Done` or close them; the owner does that after reviewing.
 

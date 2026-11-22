@@ -4,21 +4,23 @@ Append-only. One entry per run, including failed and negative results. Each entr
 
 Scores are **development folds only** unless the entry is marked `LOCKED TEST` (owner-approved, at most once per candidate).
 
+Links: git hashes open the commit on GitHub. MLflow run IDs open the run in the local MLflow UI, so start it first from the repo root: `conda run -n transit_env mlflow ui --backend-store-uri sqlite:///data/mlflow/mlflow.db`.
+
 ## Summary table
 
 | ID | Date | Git | Hypothesis | Change | MAE (s) | Δ vs B0 [95% CI] | Δ vs best baseline | Verdict |
 |---|---|---|---|---|---|---|---|---|
-| E000 | 2026-11-19 | 56c993e | prior evidence | Segment 4 notebook, not run under the harness | see below | n/a | n/a | context |
-| E001 | 2026-11-20 | bb769cf | H0 | dev: harmonic_huber (7741d709320c49ae9da47ce907853ecd) | 139.0 (B0 166.2) | -27.2 [-36.0, -18.6] (-16.4%) | -4.2 vs B3_calendar_median | provisional baseline |
-| E002 | 2026-11-20 | 64f51eb | H1 | dev: harmonic_huber (f38bff5b31864f3497745333592f9ee2) | 134.4 (B0 166.1) | -31.7 [-38.8, -24.7] (-19.1%) | -2.6 vs B3_calendar_median | H1 confirmed; superseded by E003 |
-| E003 | 2026-11-20 | 5d9cfa5 | H1 | dev: harmonic_huber (98ca4b712d70439eaf1fde2a555d32fe) | 134.5 (B0 166.2) | -31.7 [-38.8, -24.7] (-19.1%) | -2.5 vs B3_calendar_median | keep; current baseline |
-| E004 | 2026-11-20 | 1fe6300 | H0 | dev: harmonic_huber + traversal diagnostics (a9a38c98ebe3421e8d0f8562c594fef5) | 134.5 (B0 166.2) | -31.7 [-38.8, -24.7] (-19.1%) | -2.5 vs B3_calendar_median | diagnostic; see H7 |
-| E005 | 2026-11-21 | 2ba991b | H4 | dev: pooled_harmonic (60dd6de41dd34ac1835385a63a510b98) | 165.1 (B0 166.2) | -1.0 [-7.3, +4.4] (-0.6%) | +28.1 vs B3_calendar_median | discard |
-| E006 | 2026-11-21 | 714ceff | H4 | dev: pooled_harmonic_partial (f4dabda4739742f99091f28fc7051fed) | 146.4 (B0 166.2) | -19.8 [-25.5, -14.1] (-11.9%) | +9.4 vs B3_calendar_median | discard; H4 refuted |
-| E007 | 2026-11-21 | 98ddf13 | H3 | dev: harmonic_recent_level (b57247076a5a43e2a2ad5ebf8d14b4d3) | 138.5 (B0 166.2) | -27.6 [-35.2, -20.1] (-16.6%) | +1.5 vs B3_calendar_median | discard; H3 refuted at this history length |
-| E008 | 2026-11-22 | 7e8ec57 | #21 | dev: harmonic_huber (9e031ab3b21441eb9a4bc84b5cb3a5fa) | 134.6 (B0 166.3) | -31.7 [-38.9, -24.8] (-19.1%) | -2.5 vs B3_calendar_median | keep; untracked journeys excluded, baseline unchanged |
-| E009 | 2026-11-22 | b838ef7 | H6 | dev: harmonic_huber + calendar_median anchor (17781bc9f5d145fe93d8558d478515ee) | 136.3 (B0 166.3) | -30.0 [-38.0, -21.9] (-18.0%) | -4.6 vs B3_calendar_median | discard; bias removed (+2.8 s) but MAE +1.7 vs E008 |
-| E010 | 2026-11-22 | 7980583 | #12 | dev: harmonic_huber (20ccac3e2f11424598521a00fc921fe5) | 134.6 (B0 166.3) | -31.7 [-38.8, -25.0] (-19.1%) | -1.8 vs B3_calendar_median | keep; stale first-stop departures train link 1 (+1,297 links), new reference baseline |
+| E000 | 2026-11-19 | [56c993e](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/56c993e) | prior evidence | Segment 4 notebook, not run under the harness | see below | n/a | n/a | context |
+| E001 | 2026-11-20 | [bb769cf](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/bb769cf) | H0 | dev: harmonic_huber ([7741d709320c49ae9da47ce907853ecd](http://127.0.0.1:5000/#/experiments/1/runs/7741d709320c49ae9da47ce907853ecd)) | 139.0 (B0 166.2) | -27.2 [-36.0, -18.6] (-16.4%) | -4.2 vs B3_calendar_median | provisional baseline |
+| E002 | 2026-11-20 | [64f51eb](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/64f51eb) | H1 | dev: harmonic_huber ([f38bff5b31864f3497745333592f9ee2](http://127.0.0.1:5000/#/experiments/1/runs/f38bff5b31864f3497745333592f9ee2)) | 134.4 (B0 166.1) | -31.7 [-38.8, -24.7] (-19.1%) | -2.6 vs B3_calendar_median | H1 confirmed; superseded by E003 |
+| E003 | 2026-11-20 | [5d9cfa5](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/5d9cfa5) | H1 | dev: harmonic_huber ([98ca4b712d70439eaf1fde2a555d32fe](http://127.0.0.1:5000/#/experiments/1/runs/98ca4b712d70439eaf1fde2a555d32fe)) | 134.5 (B0 166.2) | -31.7 [-38.8, -24.7] (-19.1%) | -2.5 vs B3_calendar_median | keep; current baseline |
+| E004 | 2026-11-20 | [1fe6300](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/1fe6300) | H0 | dev: harmonic_huber + traversal diagnostics ([a9a38c98ebe3421e8d0f8562c594fef5](http://127.0.0.1:5000/#/experiments/1/runs/a9a38c98ebe3421e8d0f8562c594fef5)) | 134.5 (B0 166.2) | -31.7 [-38.8, -24.7] (-19.1%) | -2.5 vs B3_calendar_median | diagnostic; see H7 |
+| E005 | 2026-11-21 | [2ba991b](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/2ba991b) | H4 | dev: pooled_harmonic ([60dd6de41dd34ac1835385a63a510b98](http://127.0.0.1:5000/#/experiments/1/runs/60dd6de41dd34ac1835385a63a510b98)) | 165.1 (B0 166.2) | -1.0 [-7.3, +4.4] (-0.6%) | +28.1 vs B3_calendar_median | discard |
+| E006 | 2026-11-21 | [714ceff](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/714ceff) | H4 | dev: pooled_harmonic_partial ([f4dabda4739742f99091f28fc7051fed](http://127.0.0.1:5000/#/experiments/1/runs/f4dabda4739742f99091f28fc7051fed)) | 146.4 (B0 166.2) | -19.8 [-25.5, -14.1] (-11.9%) | +9.4 vs B3_calendar_median | discard; H4 refuted |
+| E007 | 2026-11-21 | [98ddf13](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/98ddf13) | H3 | dev: harmonic_recent_level ([b57247076a5a43e2a2ad5ebf8d14b4d3](http://127.0.0.1:5000/#/experiments/1/runs/b57247076a5a43e2a2ad5ebf8d14b4d3)) | 138.5 (B0 166.2) | -27.6 [-35.2, -20.1] (-16.6%) | +1.5 vs B3_calendar_median | discard; H3 refuted at this history length |
+| E008 | 2026-11-22 | [7e8ec57](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/7e8ec57) | #21 | dev: harmonic_huber ([9e031ab3b21441eb9a4bc84b5cb3a5fa](http://127.0.0.1:5000/#/experiments/1/runs/9e031ab3b21441eb9a4bc84b5cb3a5fa)) | 134.6 (B0 166.3) | -31.7 [-38.9, -24.8] (-19.1%) | -2.5 vs B3_calendar_median | keep; untracked journeys excluded, baseline unchanged |
+| E009 | 2026-11-22 | [b838ef7](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/b838ef7) | H6 | dev: harmonic_huber + calendar_median anchor ([17781bc9f5d145fe93d8558d478515ee](http://127.0.0.1:5000/#/experiments/1/runs/17781bc9f5d145fe93d8558d478515ee)) | 136.3 (B0 166.3) | -30.0 [-38.0, -21.9] (-18.0%) | -4.6 vs B3_calendar_median | discard; bias removed (+2.8 s) but MAE +1.7 vs E008 |
+| E010 | 2026-11-22 | [7980583](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/7980583) | #12 | dev: harmonic_huber ([20ccac3e2f11424598521a00fc921fe5](http://127.0.0.1:5000/#/experiments/1/runs/20ccac3e2f11424598521a00fc921fe5)) | 134.6 (B0 166.3) | -31.7 [-38.8, -25.0] (-19.1%) | -1.8 vs B3_calendar_median | keep; stale first-stop departures train link 1 (+1,297 links), new reference baseline |
 
 ## Entries
 
@@ -38,7 +40,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Hypothesis: H0, i.e. build the harness and reproduce B0. Candidate is the segment 4 notebook's harmonic Huber-Lasso (daily 6, weekly 3, alpha 0.003, delta 0.15), fitted per segment.
 - Prediction before running: none recorded (this run builds the harness).
 - Change: new harness at bb769cf. Data is the 2026-09-11 to 11-10 snapshot; 6 weekly dev folds from Sep 28 to Nov 8; stale final reports excluded.
-- Git: bb769cf   MLflow run: 7741d709320c49ae9da47ce907853ecd
+- Git: [bb769cf](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/bb769cf)   MLflow run: [7741d709320c49ae9da47ce907853ecd](http://127.0.0.1:5000/#/experiments/1/runs/7741d709320c49ae9da47ce907853ecd)
 - Results (dev, 27,759 visits, 40 service days; holidays scored separately):
   - MAE: B0 166.2 s, B1 166.2, B2 240.4, B3 143.2, **harmonic 139.0**, shuffled control 242.0.
   - Harmonic vs B0: −27.2 s [−36.0, −18.6], −16.4%, win rate 0.62. Beats B3 by 4.2 s overall and in 5 of 6 folds (loses in dev4).
@@ -61,7 +63,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Hypothesis: H1. The post-Nov-1 morning-peak "shift" is a timestamp defect, not a traffic change.
 - Prediction before running: dev6 (Nov 2–8) calendar-model MAE drops to the level of the other folds and beats B0; other folds barely change.
 - Change: temporary timestamp correction at 64f51eb (+1 h for rows written from 2026-11-02 08:00 stored time) plus the `schedule_clock_mismatch` exclusion (net 75 fewer scored visits than E001). Root cause tracked in issue #13. Same model and folds as E001.
-- Git: 64f51eb   MLflow run: f38bff5b31864f3497745333592f9ee2
+- Git: [64f51eb](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/64f51eb)   MLflow run: [f38bff5b31864f3497745333592f9ee2](http://127.0.0.1:5000/#/experiments/1/runs/f38bff5b31864f3497745333592f9ee2)
 - Results (dev, 27,684 visits, 40 service days):
   - MAE: B0 166.1 s, B2 240.5, B3 137.0, **harmonic 134.4**.
   - Harmonic vs B0: −31.7 s [−38.8, −24.7], **−19.1%**, win rate 0.63.
@@ -85,7 +87,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
   - The archive has no data from Feb to May 2026; route-tagged data starts around June/July.
   - Note: two live-feed checks on 2026-11-19 fall inside the locked-test period. They were used only for clock relationships: nothing was fitted, scored or plotted, and one bus's delay value was printed.
 - Change: 5d9cfa5. `forecasting/feed_clock.py` measures each journey's whole-hour offset to its descriptor. Event times are never shifted. Service days and the models' `scheduled_departure` use the timetable clock (`calendar_clock: "timetable"`). Journeys with non-whole-hour offsets are excluded (48, all in September). This replaces E002's window shift, which also moved `feed_timestamp`.
-- Git: 5d9cfa5   MLflow run: 98ca4b712d70439eaf1fde2a555d32fe
+- Git: [5d9cfa5](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/5d9cfa5)   MLflow run: [98ca4b712d70439eaf1fde2a555d32fe](http://127.0.0.1:5000/#/experiments/1/runs/98ca4b712d70439eaf1fde2a555d32fe)
 - Results (dev, 27,759 visits, the same rows as E001):
   - MAE: B0 166.2 s, B2 240.5, B3 137.0, **harmonic 134.5**.
   - Harmonic vs B0: −31.7 s [−38.8, −24.7], −19.1%, win rate 0.63.
@@ -98,7 +100,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 
 - Hypothesis: diagnostic (owner request). Is traversal predicted well even where delay is not? The owner expected segment 14's traversal to look better than its delay.
 - Change: 1fe6300. The harness now scores traversal and dwell per method and segment, logs them to MLflow (`traversal_*`, `dwell_*`, `traversal_segment_MAE_s/*`) and saves `traversals.csv.gz`. New figures: a segment-vs-stop error overview, plus a 3-row time series (traversal, upstream dwell, downstream delay) and a predicted-vs-observed traversal scatter for each segment. Transit BC's implied traversal and dwell are its timetable run time and scheduled dwell. The predictions are identical to E003. The run is marked DIRTY only because of an unrelated, uncommitted owner edit to `notebooks/dynamics_model.ipynb`.
-- Git: 1fe6300   MLflow run: a9a38c98ebe3421e8d0f8562c594fef5
+- Git: [1fe6300](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/1fe6300)   MLflow run: [a9a38c98ebe3421e8d0f8562c594fef5](http://127.0.0.1:5000/#/experiments/1/runs/a9a38c98ebe3421e8d0f8562c594fef5)
 - Results (dev, 26,811 traversals, holidays excluded):
   - **Traversal MAE:** B0 timetable 65.1 s (bias +18.8), B2 42.3, B3 35.5, **harmonic 33.7** (bias −1.2), shuffled control 42.6.
   - **Dwell:** scheduled (B0) 24.9 s MAE (bias −23.1); stop median 15.0 s (bias −4.0).
@@ -115,7 +117,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Pre-declared follow-up (run only if E005 loses on segments with their own peaks): `pooled_harmonic_partial`, the same model plus per-segment deviations from the shared shape at L1 `alpha=0.01` (shared shape `0.003`). Predicted within ±1.5 s of harmonic delay MAE. No other variants or tuning.
 - Note: H6, H7, H2 and H5 (higher or equal priority) are blocked because they need harness changes (see their tickets), so H4 runs first.
 - Change: `PooledHarmonicTraversal` in `traversal_models.py`, registered as `pooled_harmonic` and `pooled_harmonic_partial`; unit tests in `tests/unit/test_traversal_models.py`. No harness change.
-- Git: 2ba991b (clean)   MLflow run: 60dd6de41dd34ac1835385a63a510b98
+- Git: [2ba991b](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/2ba991b) (clean)   MLflow run: [60dd6de41dd34ac1835385a63a510b98](http://127.0.0.1:5000/#/experiments/1/runs/60dd6de41dd34ac1835385a63a510b98)
 - Results (dev, 27,759 visits on 40 service days, the same rows as E003/E004; 0 unscorable for every method):
   - **Delay MAE:** B0 166.2 s, B2 240.5, B3 137.0, **pooled 165.1** (harmonic was 134.5 in E003/E004).
   - Pooled vs B0: −1.0 s [−7.3, +4.4], −0.6%, win rate 0.54. **+28.1 s vs B3.**
@@ -133,7 +135,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Hypothesis: H4 refine. Per-segment deviations from the shared shape, shrunk towards it (L1 `alpha=0.01` vs `0.003` for the shape), keep the segment-specific peaks while borrowing strength for thin cells.
 - Prediction before running (declared in E005): delay MAE within ±1.5 s of harmonic (134.5 s), i.e. about 133–136 s. Not expected to beat B3 by a meaningful margin.
 - Change: none; `pooled_harmonic_partial` was committed with E005 (2ba991b).
-- Git: 714ceff (clean)   MLflow run: f4dabda4739742f99091f28fc7051fed
+- Git: [714ceff](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/714ceff) (clean)   MLflow run: [f4dabda4739742f99091f28fc7051fed](http://127.0.0.1:5000/#/experiments/1/runs/f4dabda4739742f99091f28fc7051fed)
 - Results (dev, the same 27,759 visits; 0 unscorable):
   - **Delay MAE:** B0 166.2 s, B3 137.0, **partial 146.4** (harmonic 134.5, pooled 165.1).
   - Partial vs B0: −19.8 s [−25.5, −14.1], −11.9%, win rate 0.60. **+9.4 s vs B3**; loses to B3 in all six folds (dev1 163.7 vs 158.1 … dev4 141.6 vs 125.0).
@@ -151,7 +153,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Prediction before running: **inconclusive, within ±2 s of harmonic (134.5 s).** dev1–dev2 have only about 2–3 weeks of training, so the window covers most of it and the in-sample offset is about 0. Any gain should show in dev4–dev6. H2 (longer history), which the ticket calls the setting where this matters most, is blocked, so the expected effect is small. A real gain would also show as a smaller per-segment bias (see the E006 lesson).
 - Single run; no window or threshold tuning on dev.
 - Change: `RecentLevelTraversal` wrapper in `traversal_models.py`, registered as `harmonic_recent_level`; tests in `tests/unit/test_traversal_models.py`. No harness change.
-- Git: 98ddf13 (clean)   MLflow run: b57247076a5a43e2a2ad5ebf8d14b4d3
+- Git: [98ddf13](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/98ddf13) (clean)   MLflow run: [b57247076a5a43e2a2ad5ebf8d14b4d3](http://127.0.0.1:5000/#/experiments/1/runs/b57247076a5a43e2a2ad5ebf8d14b4d3)
 - Results (dev, the same 27,759 visits; 0 unscorable):
   - **Delay MAE:** **138.5 s** vs harmonic 134.5 (E003), B3 137.0, B0 166.2.
   - vs B0: −27.6 s [−35.2, −20.1], −16.6%, win rate 0.62. **+1.5 s vs B3, +4.0 vs harmonic.**
@@ -169,7 +171,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Purpose: owner decision on #21. Journeys whose final reported delays are all exactly 0 s are untracked and excluded from scoring and training (`untracked_journey`). Rerun the current baseline (harmonic, E003) and the ladder on the new truth.
 - Prediction before running: dev rows drop by a few hundred visits (93 of 3,336 journeys are untracked, and the stale-report rule already removes many of their visits). B0 loses rows where it is exactly right (0 vs 0), so B0 MAE rises by about 1–4 s. Harmonic and B3 change by less than 2 s. The ranking (harmonic ≈ B3 < B0) stays the same.
 - Change: `untracked_journey` exclusion in `prepare_origin_visits` (harness change approved by the owner on #21), with a unit test.
-- Git: 7e8ec57 (clean; code change in be28f72)   MLflow run: 9e031ab3b21441eb9a4bc84b5cb3a5fa
+- Git: [7e8ec57](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/7e8ec57) (clean; code change in [be28f72](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/be28f72))   MLflow run: [9e031ab3b21441eb9a4bc84b5cb3a5fa](http://127.0.0.1:5000/#/experiments/1/runs/9e031ab3b21441eb9a4bc84b5cb3a5fa)
 - Audit: 1,162 visits and 1,162 training links are flagged `untracked_journey`. The stale-report rule had already removed almost all of them: eligible scored visits fall from 39,973 (E007) to 39,916 (−57) and `stale_final_report` from 1,258 to 235; training links fall from 38,633 to 38,596 (−37).
 - Results (dev, **27,742** visits, −17 vs E003–E007; 0 unscorable for every method):
   - **Delay MAE:** B0 166.3 s (was 166.2), B2 240.4 (240.5), B3 137.1 (137.0), **harmonic 134.6** (134.5).
@@ -188,7 +190,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Diagnostic before running (E008 dev predictions, no new scoring): harmonic's delay bias is not a constant anchor offset. It is −44 s at stop 2, about −37 s at stops 3–6 and grows to about −100 s at stops 11–14. Fresh first-stop departures run a median 61 s late. A constant +40 s shift of E008 harmonic would cut MAE by only about 3 s; +60 s by about 1 s.
 - Prediction before running: **small gain at best.** The learned anchor shifts forecasts by roughly +50 to +90 s, which overshoots stops 2–6 (bias turning positive) and helps stops 9–14. Harmonic delay MAE 130–136 s (E008: 134.6), overall bias −20 to +10 s (E008: −71.2). B3 moves similarly, so harmonic vs B3 stays within ±2 s of −2.5. The ticket's success bar (beating −19.1% vs B0 with most folds improving) is met only if the calendar variation in the anchor adds more than the constant shift. Single run, no tuning.
 - Change: `anchor_models.py` (`CalendarMedianAnchor`, `make_anchor_model`), `first_stop_departures` and `learned_anchor` in the harness, `--anchor` in `evaluate.py`; unit tests.
-- Git: b838ef7 (clean)   MLflow run: 17781bc9f5d145fe93d8558d478515ee
+- Git: [b838ef7](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/b838ef7) (clean)   MLflow run: [17781bc9f5d145fe93d8558d478515ee](http://127.0.0.1:5000/#/experiments/1/runs/17781bc9f5d145fe93d8558d478515ee)
 - Results (dev, the same 27,742 visits as E008; 0 unscorable for every method):
   - **Delay MAE:** B0 166.3 s, B2 228.4 (E008: 240.4), B3 140.9 (137.1), **harmonic 136.3** (134.6).
   - Harmonic vs B0: −30.0 s [−38.0, −21.9], −18.0%, win rate 0.57 (E008: −31.7, −19.1%, 0.63). −4.6 s vs B3.
@@ -213,7 +215,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
   - **Stale reports at stops 2–14** (318 arrivals, 296 departures; about 0.8%): only 53 each have pings, and **none** is within 60 s of the vehicle (median error about 26 min, some about 1 h, likely the #13 trip-label offset). Even the 0 s ones are wrong. **Correctly dropped.**
 - Change: in `prepare_origin_visits`, the stale rule no longer applies to the upstream departure when it is the journey's first stop. Scored visits are unchanged (they only check the arrival report). Unit test added.
 - Prediction before running: training links +about 1,280 (`stale_final_report` 1,567 → about 290), and stop 1 → 2 traversal-scoring rows 1,285 → about 2,150. Scored delay rows unchanged (27,742). On-time leavers take slightly less time on that link (stop-2 delay minus departure delay: median 66 s vs 73 s), so link-1 forecasts drop by a few seconds and every chained forecast moves slightly earlier. Delay bias becomes 2–5 s more negative, and harmonic delay MAE changes by −1 to +3 s (E008: 134.6). This is a correctness fix; keep it whatever the score.
-- Git: 7980583 (clean)   MLflow run: 20ccac3e2f11424598521a00fc921fe5
+- Git: [7980583](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/7980583) (clean)   MLflow run: [20ccac3e2f11424598521a00fc921fe5](http://127.0.0.1:5000/#/experiments/1/runs/20ccac3e2f11424598521a00fc921fe5)
 - Audit: training links 38,596 → **39,893** (+1,297); `stale_final_report` among training links 1,567 → 270. Scored visits unchanged (39,916 eligible, 235 stale).
 - Results (dev, the same **27,742** visits as E008; 0 unscorable):
   - **Delay MAE:** B0 166.3 s, B2 240.8 (E008: 240.4), B3 **136.4** (137.1), **harmonic 134.6** (134.6).
@@ -233,7 +235,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Hypothesis: H?
 - Prediction before running: <expected direction and size>
 - Change: <what code/config changed>
-- Git: <hash>   MLflow run: <run_id>
+- Git: [<hash>](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/<hash>)   MLflow run: [<run_id>](http://127.0.0.1:5000/#/experiments/1/runs/<run_id>)
 - Results (dev folds): MAE per method; Δ vs B0 with CI; Δ vs best baseline; per-fold spread
 - Sanity checks: leakage assertions passed? shuffled control? identical row counts?
 - Verdict: keep / discard / refine / inconclusive
