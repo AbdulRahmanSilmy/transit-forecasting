@@ -18,7 +18,7 @@ conda run -n transit_env python experiments/hwy97_delay/evaluate.py --model harm
 
 Without the approval flag, `--split test` refuses to run. Pass `--hypothesis H1 --log-id E002` to tag the run and pre-fill its LOG row.
 
-`--anchor` (default `feed`, Transit BC's earliest first-stop estimate) swaps the chain anchor $d_0$ of **B2, B3 and the candidate** for an anchor model trained per fold on observed first-stop departure delays: fresh final reports only (same stale rule as truth), published before the cutoff, from journeys disjoint from the block. The model sees only origin-time fields (first `stop_id`, its `calendar_departure`). **B0 and B1 always keep the feed anchor.** Predictions gain an `anchor_model_s` column, and the anchor is recorded as an MLflow param and tag (added for H6, owner-approved).
+`--anchor` (default `feed`, Transit BC's earliest first-stop estimate) swaps the chain anchor $d_0$ of **B2, B3 and the candidate** for an anchor model trained per fold on observed first-stop departure delays: fresh final reports only (same stale rule as truth), published before the cutoff, from journeys disjoint from the block. The model sees only origin-time fields (first `stop_id`, its `calendar_departure`). **B0 and B1 always keep the feed anchor.** Predictions gain an `anchor_model_s` column, and the anchor is recorded as an MLflow param and tag (added for H6, owner-approved). **Study runs use the default `feed`**: the owner put first-stop departure delay out of scope on 2026-11-21 (see RESEARCH.md Scope), so a learned anchor is for later real-time work, not for this study's scored runs.
 
 ## Run tracking (MLflow)
 
