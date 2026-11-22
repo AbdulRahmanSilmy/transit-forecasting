@@ -1,24 +1,25 @@
 """Measure the offset between realtime event times and the public timetable.
 
-Since its restart after the 2026-11-01/02 outage, Transit BC's GTFS-Realtime
-feed labels vehicles with trips (``trip_id`` and start descriptor) whose
-public timetable is one hour **later** than the vehicles' actual movements
-(GitHub issue #13). Event times are physical: header timestamps match real
-time, and vehicle GPS positions are at the reported stop at the reported
-arrival time. What is offset is the trip label, so ``arrival_time -
-arrival_delay`` (the feed's schedule) runs an hour before the timetable the
-label refers to.
+British Columbia has kept UTC-7 all year since 2026-03-08, so there was no
+fall-back on 2026-11-01. A timezone database older than that change converts
+later UTC times with UTC-8, so every local time from 2026-11-01 onwards looks
+one hour early and each journey's feed schedule sits one hour before its
+start descriptor (GitHub issue #13). The feed itself was correct, apart from
+schedule-only data published during the 2026-11-01 outage.
 
-Event times therefore stay untouched. Each journey's offset is measured
+Event times stay untouched. Each journey's whole-hour offset is measured
 against its own start descriptor (local wall time, which matches the static
 timetable), so analyses can choose which clock keys recurring patterns:
 
-- **feed clock:** the feed's schedule, aligned with physical event times;
-- **timetable clock:** feed schedule plus offset, the time of the trip the
-  vehicle is labelled with.
+- **feed clock:** the feed's schedule converted to local time;
+- **timetable clock:** feed schedule plus offset, the local time of the trip
+  named in the start descriptor.
 
+With an up-to-date timezone database the two clocks agree (offset 0) for
+almost every journey. The timetable clock also stays correct when the local
+conversion is wrong, so it is the safer choice for calendar features.
 :func:`timetable_offset_summary` reports the offsets by month, so any future
-change at the source (including a fix) shows up without hard-coded dates.
+offset shows up without hard-coded dates.
 """
 
 from __future__ import annotations

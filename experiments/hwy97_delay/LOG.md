@@ -22,6 +22,7 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
 | E009 | 2026-11-22 | [b838ef7](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/b838ef7) | H6 ([#14](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/14)) | dev: harmonic_huber + calendar_median anchor ([17781bc9f5d145fe93d8558d478515ee](http://127.0.0.1:5000/#/experiments/1/runs/17781bc9f5d145fe93d8558d478515ee)) | 136.3 (B0 166.3) | -30.0 [-38.0, -21.9] (-18.0%) | -4.6 vs B3_calendar_median | discard; bias removed (+2.8 s) but MAE +1.7 vs E008 |
 | E010 | 2026-11-22 | [7980583](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/7980583) | [#12](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/12) | dev: harmonic_huber ([20ccac3e2f11424598521a00fc921fe5](http://127.0.0.1:5000/#/experiments/1/runs/20ccac3e2f11424598521a00fc921fe5)) | 134.6 (B0 166.3) | -31.7 [-38.8, -25.0] (-19.1%) | -1.8 vs B3_calendar_median | keep; stale first-stop departures train link 1 (+1,297 links), new reference baseline |
 | E011 | 2026-11-22 | [650edbc](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/650edbc) | H8 ([#25](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/25)) | exploration only ([b010f8bef5fd41f986c91aa7b1584481](http://127.0.0.1:5000/#/experiments/1/runs/b010f8bef5fd41f986c91aa7b1584481)) | n/a | n/a | n/a | design and prediction registered; scored run pending |
+| E012 | 2026-11-22 | [1d996ac](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/1d996ac) | [#13](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/13) | dev: harmonic_huber ([f458246392df4df39e7259c10dd71fc5](http://127.0.0.1:5000/#/experiments/1/runs/f458246392df4df39e7259c10dd71fc5)) | 134.6 (B0 166.3) | -31.7 [-38.8, -25.0] (-19.1%) | -1.8 vs B3_calendar_median | keep; #13 root cause corrected (stale tz database), scores identical to E010 |
 
 ## Entries
 
@@ -254,6 +255,27 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
 - Prediction (pre-registered, before any H8 code): traversal MAE 33.7 → 32.5–33.5 s, with the stable cells (→ 2, → 8 in the peak) close to 0. Scored delay MAE −2 to +2 s vs E010 (134.6): removing link 2's positive bias adds to the anchor offset. Anchor-free delay MAE improves by 1–4 s. The unstable links (→ 9, → 10) stay biased.
 - Git: [650edbc](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/650edbc) (exploration code)   MLflow run: scored run pending; exploration [b010f8bef5fd41f986c91aa7b1584481](http://127.0.0.1:5000/#/experiments/1/runs/b010f8bef5fd41f986c91aa7b1584481)
 - Next: implement and score H8 when the owner agrees. The plots point to bigger levers: **H7** (holding at stops 6 and 10; needs a harness change) and an **anchor-free delay metric** to match the scope decision (owner decision; changes the success criterion).
+
+### E012: issue #13 root cause corrected (stale timezone database)
+
+- Note: logged as E011 in PR #32; renumbered to E012 on merge because E011 (the H8 exploration) was already taken. Its MLflow `log_id` tag was updated to match.
+
+- Purpose: correction, not a hypothesis test. **The explanation in E001–E003 was wrong.** British Columbia has kept UTC-7 all year since 2026-03-08, so there was no fall-back on 2026-11-01. `transit_env` had tzdata 2025b, which still fell back to UTC-8, so every local time from Nov 1 came out one hour early. Transit BC's labels and event times were correct throughout.
+- Diagnostic before the change (dev window, not a scored run): the first and last vehicle of each day, direction 0, Tue–Thu. Oct 13–29: first seen about 05:30 with label 05:33, last about 00:30 with label 23:53. Nov 3–5, as converted then: first about **04:33** with label **05:33**, last about **23:33** with label 23:53. The same labelled trips appear one hour earlier, which a relabelling can't produce (the 05:33 label would vanish). In UTC, the first bus leaves at about 12:30 in both months.
+  - System tzdata 2026e has the change (`zdump`: "MST", still UTC-7, from 2026-11-01). The [BC government release](https://archive.news.gov.bc.ca/releases/news_releases_2024-2028/2026AG0013-000209.htm) confirms it.
+  - The stored data needs no fix. Ingestion stores feed epochs as UTC and the start descriptor as local text; feed header, event times and Pi read times agree in every month.
+  - This also explains the E000/E001 "morning peak shift" and why the timetable clock beat the feed clock on Nov 2–8: the timetable clock adds the measured offset back, which cancels the conversion error.
+  - E010 attributed some 1 h stale-report errors to the #13 offset. That attribution no longer holds; those comparisons are all in UTC.
+- Change: `transit_env` tzdata updated to 2026e (conda-forge) and the pip `tzdata` to 2026.6 (environment only). [1d996ac](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/1d996ac): `feed_clock.py` docstring corrected, a guard test fails if the tz database is stale, and DST unit tests moved from the non-existent 2026-11-01 fall-back to the real 2025-11-02 one. No harness or config change.
+- Prediction before running: identical scores and rows to E010, because the timetable clock is unchanged (feed clock +1 h, offset −60 min). The November offset table flips: +60 → 0, and Nov 1–2 schedule-only journeys 0 → −60.
+- Git: [1d996ac](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/1d996ac) (clean)   MLflow run: [f458246392df4df39e7259c10dd71fc5](http://127.0.0.1:5000/#/experiments/1/runs/f458246392df4df39e7259c10dd71fc5) (an identical `--tracking files` copy is in `data/experiments/hwy97_delay/20261122T050756Z_harmonic_huber_dev/`)
+- Results (dev, the same **27,742** visits as E010):
+  - **Delay MAE:** B0 166.3 s, B3 136.4, **harmonic 134.6**, shuffled control 240.1. Every fold matches E010 exactly (harmonic / B3: dev1 152.1 / 159.7 … dev6 119.4 / 117.8).
+  - Harmonic vs B0: −31.7 s [−38.8, −25.0], −19.1%. **−1.8 s vs B3.**
+  - **Offsets by month:** Sep 98.9% at 0, Oct 99.9% at 0, **Nov 92.7% at 0** and 7.3% at −60 (E003: 92.7% at +60, 7.3% at 0). The −60 journeys are Nov 1 and early Nov 2, where Transit BC's own outage-day data applied the old fall-back; all of Nov 1 is already excluded as `untracked_journey`.
+- Sanity checks: leakage assertions passed; identical rows; shuffled control passed; 617 forecasting and 18 ingestion unit tests pass.
+- Verdict: **keep.** E010 stays the reference baseline. Keep `calendar_clock: "timetable"`: it is robust to a wrong local conversion and now equals the feed clock for almost every journey.
+- Next: unchanged (H8 #25, H9).
 
 <!-- Template for new entries:
 

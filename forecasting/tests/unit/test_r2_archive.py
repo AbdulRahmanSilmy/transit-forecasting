@@ -52,8 +52,8 @@ def test_unknown_table_is_rejected() -> None:
 
 
 def test_aware_bounds_are_converted_to_naive_utc() -> None:
-    value = pd.Timestamp("2026-11-01 17:00", tz="America/Vancouver")
-    assert r2_archive._to_naive_utc(value) == datetime(2026, 11, 2, 1, 0)
+    value = pd.Timestamp("2025-11-02 17:00", tz="America/Vancouver")
+    assert r2_archive._to_naive_utc(value) == datetime(2025, 11, 3, 1, 0)
     assert r2_archive._to_naive_utc("2026-11-01 17:00") == datetime(2026, 11, 1, 17, 0)
 
 
