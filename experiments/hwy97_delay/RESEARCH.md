@@ -33,6 +33,7 @@ Anchoring on Transit BC's first-stop estimate is deliberate. Both methods start 
 
 - **Primary:** MAE of arrival delay (seconds) over all scored stop visits, and the **paired difference vs B0** with a 95% bootstrap CI that resamples **service days** (rows on the same day are correlated).
 - **Secondary:** MAE by stop (error accumulates downstream), by lead bin, by peak/off-peak and weekday; bias; RMSE; paired win rate; macro-stop MAE.
+- **Anchor-free (secondary, owner 2026-11-22):** delay MAE, bias, by fold and by stop for the chained methods (B1, B2, B3, candidate, control) after removing each journey's anchor error (chain anchor minus the actual first-stop departure delay), plus each method's paired difference vs B3 with the same day-bootstrap CI. It measures only the delay accumulated after departure, which is the study's scope; it decides keep/discard for propagation hypotheses. B0 is not chained and is excluded. Rows without an actual departure are counted and dropped from this score only.
 - **Diagnostic only:** a "typical" stratum (B0 absolute error below its training P90). This is never used for tuning or claims.
 - **Excluded from primary scoring:** BC statutory holidays (e.g. Thanksgiving Oct 12, Remembrance Day Nov 11). They are scored and reported separately.
 
@@ -51,6 +52,8 @@ A candidate supports the hypothesis only if it beats **B0 and B3**. Beating B0 a
 ## Success criterion (predeclared)
 
 On the locked test set, the candidate's paired MAE difference vs B0 has a day-clustered 95% CI entirely below zero. Its relative MAE reduction must be **≥ 5%**, and it must also beat B3. The owner may revise the 5% threshold before the test is unlocked, never after.
+
+The anchor-free score (see Metrics) is **secondary**: it never replaces this criterion, and the headline comparison with Transit BC stays as scored.
 
 ## Data and splits
 
@@ -78,6 +81,7 @@ On the locked test set, the candidate's paired MAE difference vs B0 has a day-cl
 - [x] Stale first-stop departures still train the first link (2026-11-21, E010): the stale rule misread on-time departures as old predictions. At stops 2–14 the rule stays: 0 of 53 stale reports with vehicle pings were within 60 s.
 - [x] Untracked journeys (every final delay exactly 0 s, e.g. all of 2026-11-01) are excluded from scoring and training as `untracked_journey` (2026-11-21, #21).
 - [x] Anchor: **Transit BC's earliest estimate only** (2026-11-21, after E009). First-stop departure delay is treated as stochastic and left to a later real-time method, so H6 and any refined anchor are out of scope.
+- [x] Anchor-free secondary metric (2026-11-22, before H8's scored run): chained methods are also scored as if started from the journey's actual first-stop departure (evaluation-only; never a feature). It decides keep/discard for hypotheses about delay propagation (e.g. H7, H8). The success criterion and the comparison with Transit BC stay as scored. B0 is excluded; B1 becomes "delay stays as at the actual departure".
 - [x] Clock handling (2026-11-19, owner-directed fix after investigation, [issue #13](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/13)):
   - Cause (corrected 2026-11-22, E012): BC has kept UTC-7 since 2026-03-08, but `transit_env`'s timezone database still fell back to UTC-8 on 2026-11-01, so local times from Nov 1 looked **1 h early**. The feed's labels and times were correct. Keep tzdata current; a unit test fails if it is stale.
   - Event times are physical: the header clock matches real time, and vehicle GPS is at the stop at the reported arrival time. So they are **never shifted**, and final reports remain valid truth.

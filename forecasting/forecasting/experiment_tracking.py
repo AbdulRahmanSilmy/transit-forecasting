@@ -59,7 +59,8 @@ def flatten_metrics(metrics: Mapping[str, Any]) -> dict[str, float]:
     dict of str to float
         Keys such as ``MAE_s/harmonic_huber``, ``delta_MAE_s/B3_calendar_median``,
         ``fold_MAE_s/dev6/B0_transit_bc``, ``period_MAE_s/am_peak/...`` and
-        ``criterion/meets_all`` (booleans as 0/1). Non-finite values are dropped.
+        ``criterion/meets_all`` (booleans as 0/1), plus ``anchor_free_*``
+        secondary scores when present. Non-finite values are dropped.
     """
     flat: dict[str, float] = {}
     for name in ("common_rows", "primary_rows", "primary_days", "holiday_rows"):
@@ -108,6 +109,26 @@ def flatten_metrics(metrics: Mapping[str, Any]) -> dict[str, float]:
             name = record["segment"].replace(": ", "_").replace(" -> ", "-")
             for method in methods:
                 flat[_key("traversal_segment_MAE_s", name, method)] = record[method]
+    anchor_free = metrics.get("anchor_free")
+    if anchor_free is not None:
+        flat["anchor_free_rows"] = float(anchor_free["rows"])
+        for record in anchor_free["summary"].to_dict("records"):
+            for column in ("MAE_s", "MedAE_s", "RMSE_s", "bias_s"):
+                flat[_key("anchor_free_" + column, record["method"])] = record[column]
+        for record in anchor_free["paired_vs_B3"].to_dict("records"):
+            for column in ("delta_MAE_s", "ci_low_s", "ci_high_s"):
+                flat[_key("anchor_free_vs_B3_" + column, record["method"])] = record[
+                    column
+                ]
+        for table, group, prefix in (
+            ("by_fold", "fold", "anchor_free_fold_MAE_s"),
+            ("by_stop", "stop_sequence", "anchor_free_stop_MAE_s"),
+        ):
+            frame = anchor_free[table]
+            methods = [c for c in frame if c not in (group, "rows")]
+            for record in frame.to_dict("records"):
+                for method in methods:
+                    flat[_key(prefix, record[group], method)] = record[method]
     for section in ("control", "criterion"):
         for name, value in (metrics.get(section) or {}).items():
             flat[_key(section, name)] = float(value)
