@@ -17,6 +17,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 | E006 | 2026-11-21 | 714ceff | H4 | dev: pooled_harmonic_partial (f4dabda4739742f99091f28fc7051fed) | 146.4 (B0 166.2) | -19.8 [-25.5, -14.1] (-11.9%) | +9.4 vs B3_calendar_median | discard; H4 refuted |
 | E007 | 2026-11-21 | 98ddf13 | H3 | dev: harmonic_recent_level (b57247076a5a43e2a2ad5ebf8d14b4d3) | 138.5 (B0 166.2) | -27.6 [-35.2, -20.1] (-16.6%) | +1.5 vs B3_calendar_median | discard; H3 refuted at this history length |
 | E008 | 2026-11-22 | 7e8ec57 | #21 | dev: harmonic_huber (9e031ab3b21441eb9a4bc84b5cb3a5fa) | 134.6 (B0 166.3) | -31.7 [-38.9, -24.8] (-19.1%) | -2.5 vs B3_calendar_median | keep; untracked journeys excluded, baseline unchanged |
+| E009 | 2026-11-22 | b838ef7 | H6 | dev: harmonic_huber + calendar_median anchor (17781bc9f5d145fe93d8558d478515ee) | 136.3 (B0 166.3) | -30.0 [-38.0, -21.9] (-18.0%) | -4.6 vs B3_calendar_median | discard; bias removed (+2.8 s) but MAE +1.7 vs E008 |
 
 ## Entries
 
@@ -178,6 +179,29 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Interpretation: **prediction failed in size, not direction.** B0 rose, as expected, but by 0.1 s, not 1–4 s, because the 10-minute stale rule (#12) had already caught 95% of untracked visits. The exclusion is now explicit, so it no longer depends on those reports being published early, but it doesn't change any conclusion.
 - Verdict: **keep (truth definition).** All dev numbers from E008 on use it; E003–E007 differ by at most 0.1 s, so their comparisons stand. Harmonic (E008: 134.6 s) remains the baseline.
 - Next: H6 (#14) needs the owner to approve its harness change; otherwise H8 (#25), judged on per-segment × hour traversal bias.
+
+### E009: learned first-stop anchor (H6, #14)
+
+- Hypothesis: H6. First-stop departure delay has a recurring calendar pattern, so a learned anchor (first stop × weekday × hour median of observed departure delay, trained per fold before the cutoff) lowers delay MAE versus Transit BC's earliest estimate, which is 0 s for 99.6% of journeys.
+- Harness change approved by the owner (2026-11-21, "start working on H6"): opt-in `--anchor`, default `feed` reproduces E008. B0/B1 keep the feed anchor; B2, B3 and the candidate use the learned one. Training departures use the stale rule and exclude untracked journeys (#21).
+- Diagnostic before running (E008 dev predictions, no new scoring): harmonic's delay bias is not a constant anchor offset. It is −44 s at stop 2, about −37 s at stops 3–6 and grows to about −100 s at stops 11–14. Fresh first-stop departures run a median 61 s late. A constant +40 s shift of E008 harmonic would cut MAE by only about 3 s; +60 s by about 1 s.
+- Prediction before running: **small gain at best.** The learned anchor shifts forecasts by roughly +50 to +90 s, which overshoots stops 2–6 (bias turning positive) and helps stops 9–14. Harmonic delay MAE 130–136 s (E008: 134.6), overall bias −20 to +10 s (E008: −71.2). B3 moves similarly, so harmonic vs B3 stays within ±2 s of −2.5. The ticket's success bar (beating −19.1% vs B0 with most folds improving) is met only if the calendar variation in the anchor adds more than the constant shift. Single run, no tuning.
+- Change: `anchor_models.py` (`CalendarMedianAnchor`, `make_anchor_model`), `first_stop_departures` and `learned_anchor` in the harness, `--anchor` in `evaluate.py`; unit tests.
+- Git: b838ef7 (clean)   MLflow run: 17781bc9f5d145fe93d8558d478515ee
+- Results (dev, the same 27,742 visits as E008; 0 unscorable for every method):
+  - **Delay MAE:** B0 166.3 s, B2 228.4 (E008: 240.4), B3 140.9 (137.1), **harmonic 136.3** (134.6).
+  - Harmonic vs B0: −30.0 s [−38.0, −21.9], −18.0%, win rate 0.57 (E008: −31.7, −19.1%, 0.63). −4.6 s vs B3.
+  - **By fold, harmonic learned vs feed anchor (E008):** dev1 156.0 vs 152.2, dev2 140.2 vs 137.0, dev3 128.5 vs 124.2, dev4 127.5 vs 127.2, dev5 145.3 vs 149.6, dev6 122.9 vs 119.6. Worse in 5 of 6.
+  - **Bias:** harmonic +2.8 s (E008: −71.2), B3 +18.9 (−55.1). MedAE 98.1 vs 86.2 (worse), RMSE 198.8 vs 209.1 (better).
+  - **By stop (harmonic bias, learned vs feed):** stop 2 +29 vs −44, stops 3–6 +31 to +48 vs −27 to −42, stop 9 −1 vs −75, stops 11–14 −22 to −32 vs −96 to −107. MAE is 14–19 s worse at stops 2–6 and 6–13 s better at stops 10–14.
+  - **Anchor:** predicted first-stop departure delay mean 73 s, median 64 (P10–P90 34–119).
+  - Traversal and dwell scores unchanged (the anchor only moves chained delay).
+- Sanity checks: leakage assertions (including the new anchor ones) passed; identical rows; shuffled control passed (228.0 vs B2 228.4).
+- Interpretation: **prediction mostly held:** bias removed, no MAE gain (harmonic 136.3 s, just outside the predicted 130–136; B3 lost more than expected, so harmonic vs B3 widened to −4.6). Two lessons:
+  1. **The learned anchor is about 30 s too late.** With the feed anchor, stop 2 is 44 s early, so the effective departure lag is about 44 s, yet the anchor predicts 73 s on average. Fresh first-stop departure reports skew late: when a bus leaves on time, the feed seems to leave its 0 s estimate in place, so the report is stale and excluded from training. This is the selection bias suspected before the run.
+  2. **Most of the early bias builds up along the chain, not at the anchor.** Harmonic's bias falls from −44 s at stop 2 to about −100 s at stop 14. That roughly matches the per-link mean biases: dwell rule −4.0 s × 12 stops plus traversal −1.3 s × 13 links ≈ −65 s. A single anchor shift can't fix a bias that grows with stop number. It trades early-stop error for late-stop error.
+- Verdict: **discard (calendar-median anchor); H6 refuted in this form.** Keep the `--anchor` option (default `feed`) for future anchor models. Harmonic with the feed anchor (E008: 134.6 s) stays the baseline.
+- Next: proposed **H9** (dwell mean bias, needs a harness change) and H8 (#25, traversal mean bias) attack the growing part of the bias. A refined anchor would need training data free of the stale-report selection, e.g. implied departures from fresh stop-2 arrivals.
 
 <!-- Template for new entries:
 
