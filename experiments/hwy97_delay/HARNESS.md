@@ -47,6 +47,10 @@ Artifacts per run:
 
 It also prints a ready-to-paste LOG.md summary row.
 
+## Anchor-free score (secondary)
+
+Each scored row carries two evaluation-only columns, never used as features: `actual_departure_delay_s` (the journey's final first-stop departure minus its feed schedule) and `chain_anchor_delay_s` (the anchor the chained methods started from). `score_predictions` adds an `anchor_free` block: every chained method's prediction is shifted by `chain_anchor_delay_s − actual_departure_delay_s`, and B1 becomes the actual departure delay. It reports `summary`, `by_fold`, `by_stop` and `paired_vs_B3` (day-bootstrap CI). B0 is excluded. MLflow metrics are prefixed `anchor_free_`; the printed output and the LOG row show the candidate's anchor-free MAE. The success criterion is unchanged (RESEARCH.md).
+
 ## Model interface
 
 ```python
