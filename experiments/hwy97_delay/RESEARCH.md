@@ -79,9 +79,9 @@ On the locked test set, the candidate's paired MAE difference vs B0 has a day-cl
 - [x] Untracked journeys (every final delay exactly 0 s, e.g. all of 2026-11-01) are excluded from scoring and training as `untracked_journey` (2026-11-21, #21).
 - [x] Anchor: **Transit BC's earliest estimate only** (2026-11-21, after E009). First-stop departure delay is treated as stochastic and left to a later real-time method, so H6 and any refined anchor are out of scope.
 - [x] Clock handling (2026-11-19, owner-directed fix after investigation, [issue #13](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/13)):
-  - Since Transit BC's restart after the 2026-11-01/02 outage, the feed labels vehicles with trips whose public timetable is **1 h later** than their movements.
+  - Cause (corrected 2026-11-22, E011): BC has kept UTC-7 since 2026-03-08, but `transit_env`'s timezone database still fell back to UTC-8 on 2026-11-01, so local times from Nov 1 looked **1 h early**. The feed's labels and times were correct. Keep tzdata current; a unit test fails if it is stale.
   - Event times are physical: the header clock matches real time, and vehicle GPS is at the stop at the reported arrival time. So they are **never shifted**, and final reports remain valid truth.
-  - Service days and calendar features use the **timetable clock** (feed schedule plus the journey's whole-hour offset to its start descriptor; `calendar_clock` in config.json), because recurring behaviour is keyed to the trip.
+  - Service days and calendar features use the **timetable clock** (feed schedule plus the journey's whole-hour offset to its start descriptor; `calendar_clock` in config.json), because recurring behaviour is keyed to the trip. It also stays right if a local-time conversion is wrong; with a current timezone database it equals the feed clock for almost every journey.
   - Journeys with non-whole-hour offsets are excluded (`schedule_clock_mismatch`).
 
 ## Backlog (agent proposes, owner prioritises)
