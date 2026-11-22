@@ -23,6 +23,7 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
 | E010 | 2026-11-22 | [7980583](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/7980583) | [#12](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/12) | dev: harmonic_huber ([20ccac3e2f11424598521a00fc921fe5](http://127.0.0.1:5000/#/experiments/1/runs/20ccac3e2f11424598521a00fc921fe5)) | 134.6 (B0 166.3) | -31.7 [-38.8, -25.0] (-19.1%) | -1.8 vs B3_calendar_median | keep; stale first-stop departures train link 1 (+1,297 links), new reference baseline |
 | E011 | 2026-11-22 | [650edbc](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/650edbc) | H8 ([#25](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/25)) | exploration only ([b010f8bef5fd41f986c91aa7b1584481](http://127.0.0.1:5000/#/experiments/1/runs/b010f8bef5fd41f986c91aa7b1584481)) | n/a | n/a | n/a | design and prediction registered; scored run pending |
 | E012 | 2026-11-22 | [1d996ac](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/1d996ac) | [#13](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/13) | dev: harmonic_huber ([f458246392df4df39e7259c10dd71fc5](http://127.0.0.1:5000/#/experiments/1/runs/f458246392df4df39e7259c10dd71fc5)) | 134.6 (B0 166.3) | -31.7 [-38.8, -25.0] (-19.1%) | -1.8 vs B3_calendar_median | keep; #13 root cause corrected (stale tz database), scores identical to E010 |
+| E013 | 2026-11-22 | [bb12d9b](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/bb12d9b) | anchor-free metric | dev: harmonic_huber ([eaec6ba932224a028e518e2fc0810ac7](http://127.0.0.1:5000/#/experiments/1/runs/eaec6ba932224a028e518e2fc0810ac7)) | 134.6 (B0 166.3; anchor-free 123.0, defective) | -31.7 [-38.8, -25.0] (-19.1%) | -1.8 vs B3_calendar_median | primary unchanged; anchor-free superseded by E014 |
 
 ## Entries
 
@@ -282,6 +283,19 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
 - Purpose: owner decision (2026-11-22). Add the anchor-free score as a secondary metric (RESEARCH.md Metrics) and rescore the reference baseline, so H8 has an anchor-free comparison point.
 - Change: [b0a8101](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/b0a8101). Evaluation-only `actual_departure_delay_s` and `chain_anchor_delay_s` columns; `anchor_free_scores` in `score_predictions`; MLflow `anchor_free_*` metrics; printed table; anchor-free MAE in the LOG row. Two unit tests: a chain that is wrong only by its anchor scores 0, and an end-to-end run.
 - Prediction before running: primary scores identical to E010/E012 (harmonic 134.6 s, B3 136.4 s, same 27,742 rows). Anchor-free (from the E011 exploration, which included holiday rows): harmonic 116–119 s, B3 120–123 s, harmonic vs B3 −3 to −5 s; harmonic bias about −15 s, B3 about 0 s; fewer than 1% of rows without an actual departure.
+- Git: [bb12d9b](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/bb12d9b) (clean)   MLflow run: [eaec6ba932224a028e518e2fc0810ac7](http://127.0.0.1:5000/#/experiments/1/runs/eaec6ba932224a028e518e2fc0810ac7)
+- Results (dev, the same 27,742 visits):
+  - **Primary, as predicted:** identical to E010/E012. B0 166.3 s, B3 136.4, harmonic 134.6; harmonic vs B0 −31.7 s [−38.8, −25.0].
+  - **Anchor-free, as computed in this run:** harmonic 123.0 s (bias −25.9), B3 126.3 (−10.8), B1 142.8, B2 231.9; harmonic vs B3 −3.3 s [−7.7, +0.4]; 0 rows without a departure.
+- Sanity checks: leakage assertions passed; identical rows; shuffled control passed (240.1 vs B2 240.8).
+- Interpretation: **prediction failed for the anchor-free score** (expected harmonic 116–119 s). Tracing the gap to the exploration's 117.7 s found a defect in the new metric. Four journeys on 2026-11-02 (outage restart) have two stop-1 departure times at the same publication, 1 h apart, both reporting 0 s delay. The run took the actual departure delay from time arithmetic (−3,600 s) rather than the reported `departure_delay` that truth uses. Those 52 rows added 6.7 s to the anchor-free MAE. The primary score is unaffected.
+- Verdict: **superseded by E014** (anchor-free departure delay taken from the reported field, like truth). Primary results stand.
+
+
+### E014: anchor-free baseline rescore, departure from the reported delay
+
+- Purpose: rerun E013 after fixing the anchor-free departure definition: the final reported `departure_delay` at the first stop (consistent with truth, which uses the reported `arrival_delay`); time arithmetic only as a fallback. Unit test for the two-clock case.
+- Prediction before running: primary identical to E013. Anchor-free: the 52 affected rows lose their ~3,600 s errors, so harmonic about 123.0 − 6.7 ≈ 116 s and B3 about 119–120 s; harmonic vs B3 about −3 s; harmonic bias about −15 to −20 s.
 - Git: <pending>   MLflow run: <pending>
 
 <!-- Template for new entries:

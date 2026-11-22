@@ -920,8 +920,8 @@ def evaluate_block(
         One row per scored visit with truth, ``pred_<method>`` columns and
         breakdown fields. With a learned anchor, ``anchor_model_s`` holds the
         journey's predicted first-stop departure delay.
-        ``actual_departure_delay_s`` (the journey's final first-stop departure
-        minus its feed schedule) and ``chain_anchor_delay_s`` (the anchor the
+        ``actual_departure_delay_s`` (the journey's final reported first-stop
+        departure delay) and ``chain_anchor_delay_s`` (the anchor the
         chained methods started from) are evaluation-only; they feed the
         anchor-free score.
     link_rows : pandas.DataFrame
@@ -1006,9 +1006,18 @@ def evaluate_block(
     chain_first = chain_visits.loc[chain_visits["is_first_stop"]].set_index(
         "trip_instance_key"
     )
+    # Like truth (the reported arrival_delay), use the reported departure_delay;
+    # time arithmetic is only a fallback. The two disagree by 1 h for a few
+    # Nov 2 journeys whose feed carried two clocks during the outage restart.
     departure_delay = (
         first_stop["final_departure_time"] - first_stop["scheduled_departure"]
     ).dt.total_seconds()
+    if "final_departure_delay" in first_stop:
+        reported = first_stop["final_departure_delay"].astype(float)
+        departure_delay = reported.where(
+            reported.notna() & first_stop["final_departure_time"].notna(),
+            departure_delay,
+        )
     chain_anchor = (
         chain_first["anchor_time"] - chain_first["scheduled_departure"]
     ).dt.total_seconds()

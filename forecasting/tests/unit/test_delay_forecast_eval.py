@@ -396,6 +396,36 @@ def test_anchor_free_score_removes_only_the_anchor_error():
     assert metrics["summary"].set_index("method").loc[B2, "MAE_s"] == pytest.approx(90)
 
 
+def test_actual_departure_uses_the_reported_delay_like_truth():
+    config = _config()
+    updates = _updates(days=10, departure_lags={15: 120, 19: 30, 22: 30})
+    # One journey's final stop-1 report carries a second clock: its time is
+    # 1 h early while its reported delay is the real one (Nov 2 restart case).
+    final = updates.groupby(["trip_id", "trip_start_timestamp"])[
+        "feed_timestamp"
+    ].transform("max")
+    target = (
+        updates["trip_id"].eq("t19")
+        & updates["trip_start_timestamp"].str.startswith("2026-10-08")
+        & updates["stop_sequence"].eq(1)
+        & updates["feed_timestamp"].eq(final)
+    )
+    assert target.sum() == 1
+    updates.loc[target, "departure_time"] -= pd.Timedelta(hours=1)
+    prepared = _prepare(updates)
+    rows, _ = evaluate_block(
+        prepared,
+        model_name="segment_median",
+        block_start=date(2026, 10, 8),
+        block_days=1,
+        config=config,
+        fold="f",
+    )
+    departures = rows.groupby("trip_instance_key")["actual_departure_delay_s"].first()
+    assert sorted(departures.round().tolist()) == [30.0, 30.0, 120.0]
+    assert rows["chain_anchor_delay_s"].eq(0).all()
+
+
 def test_run_study_reports_anchor_free_scores_and_log_row():
     run = run_study(
         _config(),
