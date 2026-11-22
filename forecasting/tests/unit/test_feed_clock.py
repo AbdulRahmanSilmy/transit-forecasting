@@ -6,8 +6,17 @@ from forecasting.delay_forecast_eval import prepare_origin_visits, run_study
 from forecasting.feed_clock import journey_timetable_offsets, timetable_offset_summary
 
 
+def test_timezone_database_knows_bc_permanent_utc_minus_7():
+    # BC stopped changing clocks after 2026-03-08 (issue #13). A stale tz
+    # database falls back to UTC-8 on 2026-11-01 and shifts local times 1 h.
+    local = pd.Timestamp("2026-11-03 12:00Z").tz_convert("America/Vancouver")
+    assert local.utcoffset() == pd.Timedelta(
+        hours=-7
+    ), "Stale timezone database: update tzdata in transit_env"
+
+
 def _relabel(frame, hours, trips=None):
-    """Simulate the feed defect: trip labels point ``hours`` later; times stay."""
+    """Simulate a journey whose start descriptor is ``hours`` off its times."""
     relabelled = frame.copy()
     rows = relabelled["trip_id"].isin(trips) if trips is not None else slice(None)
     starts = pd.to_datetime(relabelled.loc[rows, "trip_start_timestamp"])
@@ -21,10 +30,10 @@ def test_offsets_are_whole_hours_or_flagged():
     scheduled = pd.Series(
         pd.to_datetime(
             [
-                "2026-11-03 16:00Z",
-                "2026-11-03 16:00Z",
-                "2026-11-03 16:00Z",
-                "2026-11-03 16:00Z",
+                "2026-11-03 15:00Z",
+                "2026-11-03 15:00Z",
+                "2026-11-03 15:00Z",
+                "2026-11-03 15:00Z",
             ]
         )
     )

@@ -23,9 +23,9 @@ def test_harmonics_repeat_across_weeks_dst_and_preserve_input():
         {
             "upstream_departure_time": pd.to_datetime(
                 [
-                    "2026-10-25 08:30Z",
-                    "2026-11-01 08:30Z",
-                    "2026-11-01 09:30Z",
+                    "2025-10-26 08:30Z",
+                    "2025-11-02 08:30Z",
+                    "2025-11-02 09:30Z",
                 ]
             ),
             "ignored_target": [1, 1000, 3000],
@@ -217,19 +217,19 @@ def test_splits_keep_calendar_gaps_and_purge_late_endpoint_labels():
 def test_splits_use_wall_clock_cutover_across_dst_and_reject_bad_dates():
     visits = _visits()
     local = pd.date_range(
-        "2026-09-14 12:00", periods=60, freq="D", tz="America/Vancouver"
+        "2025-09-15 12:00", periods=60, freq="D", tz="America/Vancouver"
     )
     visits["upstream_departure_time"] = local.tz_convert("UTC")
     visits["arrival_time"] = visits.upstream_departure_time + pd.Timedelta(minutes=12)
     visits["available_at"] = visits.arrival_time + pd.Timedelta(minutes=1)
     visits["service_day"] = local.tz_localize(None).normalize()
     _, summary = make_harmonic_time_splits(
-        visits, evaluation_end=pd.Timestamp("2026-11-13")
+        visits, evaluation_end=pd.Timestamp("2025-11-14")
     )
-    assert summary.iloc[-1].fit_cutoff_utc == pd.Timestamp("2026-11-05 11:00Z")
+    assert summary.iloc[-1].fit_cutoff_utc == pd.Timestamp("2025-11-06 11:00Z")
     visits.loc[0, "service_day"] += pd.Timedelta(days=1)
     with pytest.raises(ValueError, match="cutover"):
-        make_harmonic_time_splits(visits, evaluation_end=pd.Timestamp("2026-11-13"))
+        make_harmonic_time_splits(visits, evaluation_end=pd.Timestamp("2025-11-14"))
 
 
 def test_experiment_bundle_preserves_fitted_model_and_previous_runs(tmp_path):

@@ -41,10 +41,10 @@ def _engine_and_schedule():
             "trip_id": ["normal", "night", "normal", "normal"],
             "trip_instance_key": ["normal|1", "night|1", "normal|2", "normal|3"],
             "trip_start_timestamp": [
-                "2026-10-31 08:00",
-                "2026-11-02 01:00",
-                "2026-11-01 08:00",
-                "2026-11-03 08:00",
+                "2025-11-01 08:00",
+                "2025-11-03 01:00",
+                "2025-11-02 08:00",
+                "2025-11-04 08:00",
             ],
             "segment_id": [0, 0, 0, 0],
             "from_stop_id": ["a"] * 4,
@@ -53,10 +53,10 @@ def _engine_and_schedule():
             "delta_delay_seconds": [-30, 0, 120, 10],
             "available_at": pd.to_datetime(
                 [
-                    "2026-10-31 15:06Z",
-                    "2026-11-02 09:06Z",
-                    "2026-11-01 16:06Z",
-                    "2026-11-03 16:06Z",
+                    "2025-11-01 15:06Z",
+                    "2025-11-03 09:06Z",
+                    "2025-11-02 16:06Z",
+                    "2025-11-04 16:06Z",
                 ]
             ),
             "exclusion_reason": ["included"] * 4,
@@ -74,14 +74,14 @@ def _engine_and_schedule():
         traversals,
         pd.DataFrame(),
         pd.DataFrame(),
-        pd.Timestamp("2026-11-03 23:00Z"),
+        pd.Timestamp("2025-11-04 23:00Z"),
     )
     return result, schedule
 
 
 def _data(days=63):
     rows = []
-    for day_number, day in enumerate(pd.date_range("2026-08-03", periods=days)):
+    for day_number, day in enumerate(pd.date_range("2025-08-04", periods=days)):
         for segment in range(3):
             for hour in (7, 8, 12, 16, 17, 20):
                 timestamp = (
@@ -137,20 +137,20 @@ def test_scheduled_features_signed_targets_extended_times_dst_and_immutability()
     original_schedule = schedule.copy(deep=True)
     with pytest.warns(UserWarning, match="Excluded 1"):
         data = prepare_segment_delay_data(
-            result, schedule, observation_start="2026-10-30T00:00Z"
+            result, schedule, observation_start="2025-10-31T00:00Z"
         )
     assert data.examples[TARGET].tolist() == [-30, 120, 0]
     assert data.examples["service_date"].tolist() == [
-        pd.Timestamp("2026-10-31"),
-        pd.Timestamp("2026-11-01"),
-        pd.Timestamp("2026-11-01"),
+        pd.Timestamp("2025-11-01"),
+        pd.Timestamp("2025-11-02"),
+        pd.Timestamp("2025-11-02"),
     ]
     assert data.examples["scheduled_at"].tolist() == list(
         pd.to_datetime(
             [
-                "2026-10-31 15:00Z",
-                "2026-11-01 16:00Z",
-                "2026-11-02 09:00Z",
+                "2025-11-01 15:00Z",
+                "2025-11-02 16:00Z",
+                "2025-11-03 09:00Z",
             ]
         )
     )
@@ -167,7 +167,7 @@ def test_scheduled_features_signed_targets_extended_times_dst_and_immutability()
         other = prepare_segment_delay_data(
             replace(result, traversals=changed),
             schedule,
-            observation_start="2026-10-30T00:00Z",
+            observation_start="2025-10-31T00:00Z",
         )
     pdt.assert_frame_equal(data.examples[FEATURES], other.examples[FEATURES])
 
@@ -178,7 +178,7 @@ def test_schedule_errors_and_modelling_exclusion_audit():
         prepare_segment_delay_data(
             result,
             pd.concat([schedule, schedule.iloc[[0]]]),
-            observation_start="2026-10-30T00:00Z",
+            observation_start="2025-10-31T00:00Z",
         )
     with pytest.raises(ValueError, match="Duplicate"):
         prepare_segment_delay_data(
@@ -187,23 +187,23 @@ def test_schedule_errors_and_modelling_exclusion_audit():
                 traversals=pd.concat([result.traversals, result.traversals.iloc[[0]]]),
             ),
             schedule,
-            observation_start="2026-10-30T00:00Z",
+            observation_start="2025-10-31T00:00Z",
         )
     changed = result.traversals.astype({TARGET: float}).copy()
     changed.loc[0, TARGET] = np.inf
-    changed.loc[1, "trip_start_timestamp"] = "2026-11-02 01:01"
+    changed.loc[1, "trip_start_timestamp"] = "2025-11-03 01:01"
     with pytest.warns(UserWarning):
         data = prepare_segment_delay_data(
             replace(result, traversals=changed),
             schedule,
-            observation_start="2026-10-30T00:00Z",
+            observation_start="2025-10-31T00:00Z",
         )
     counts = data.audit.set_index("reason")["count"]
     assert counts["nonfinite_target"] == counts["misaligned_trip_start"] == 1
     assert np.isfinite(data.examples[TARGET]).all()
     with pytest.raises(ValueError, match="divisor"):
         prepare_segment_delay_data(
-            result, schedule, observation_start="2026-10-30T00:00Z", time_bin_minutes=17
+            result, schedule, observation_start="2025-10-31T00:00Z", time_bin_minutes=17
         )
 
 
@@ -219,7 +219,7 @@ def test_exact_repeated_stop_sequence_join():
         data = prepare_segment_delay_data(
             replace(result, traversals=changed),
             schedule,
-            observation_start="2026-10-30T00:00Z",
+            observation_start="2025-10-31T00:00Z",
         )
     assert data.examples.iloc[0]["minute_of_day"] == 482
 
@@ -232,7 +232,7 @@ def test_nullable_missing_target_is_audited_not_retained():
         data = prepare_segment_delay_data(
             replace(result, traversals=changed),
             schedule,
-            observation_start="2026-10-30T00:00Z",
+            observation_start="2025-10-31T00:00Z",
         )
     assert not data.examples[TARGET].isna().any()
     assert data.audit.set_index("reason").loc["nonfinite_target", "count"] == 1

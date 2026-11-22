@@ -31,37 +31,37 @@ def _updates():
             "trip_route_id": ["97-KEL"] * 6,
             "trip_direction_id": [0] * 6,
             "trip_id": ["trip"] * 6,
-            "trip_start_timestamp": ["2026-11-03 01:00:00"] * 6,
+            "trip_start_timestamp": ["2025-11-04 01:00:00"] * 6,
             "stop_id": ["u", "d"] * 3,
             "stop_sequence": [1, 2] * 3,
             "feed_timestamp": pd.to_datetime(
                 [
-                    "2026-11-03 08:00Z",
-                    "2026-11-03 08:00Z",
-                    "2026-11-03 08:30Z",
-                    "2026-11-03 08:30Z",
-                    "2026-11-03 10:12Z",
-                    "2026-11-03 10:12Z",
+                    "2025-11-04 08:00Z",
+                    "2025-11-04 08:00Z",
+                    "2025-11-04 08:30Z",
+                    "2025-11-04 08:30Z",
+                    "2025-11-04 10:12Z",
+                    "2025-11-04 10:12Z",
                 ]
             ),
             "arrival_time": pd.to_datetime(
                 [
-                    "2026-11-03 10:00:30Z",
-                    "2026-11-03 10:09:00Z",
-                    "2026-11-03 10:01:00Z",
-                    "2026-11-03 10:10:00Z",
-                    "2026-11-03 10:02:00Z",
-                    "2026-11-03 10:11:00Z",
+                    "2025-11-04 10:00:30Z",
+                    "2025-11-04 10:09:00Z",
+                    "2025-11-04 10:01:00Z",
+                    "2025-11-04 10:10:00Z",
+                    "2025-11-04 10:02:00Z",
+                    "2025-11-04 10:11:00Z",
                 ]
             ),
             "departure_time": pd.to_datetime(
                 [
-                    "2026-11-03 10:01:30Z",
-                    "2026-11-03 10:10:00Z",
-                    "2026-11-03 10:02:00Z",
-                    "2026-11-03 10:11:00Z",
-                    "2026-11-03 10:03:00Z",
-                    "2026-11-03 10:12:00Z",
+                    "2025-11-04 10:01:30Z",
+                    "2025-11-04 10:10:00Z",
+                    "2025-11-04 10:02:00Z",
+                    "2025-11-04 10:11:00Z",
+                    "2025-11-04 10:03:00Z",
+                    "2025-11-04 10:12:00Z",
                 ]
             ),
             "arrival_delay": [30, 60, 60, 120, 120, 180],
@@ -78,11 +78,11 @@ def test_early_dynamics_and_latest_dwell_adjusted_reference_preserve_inputs():
     original, original_segment = updates.copy(deep=True), segment.copy(deep=True)
     result = prepare_early_traversal_comparison(updates, segment)
     row = result.observations.iloc[0]
-    assert row.origin_time == pd.Timestamp("2026-11-03 08:00Z")
+    assert row.origin_time == pd.Timestamp("2025-11-04 08:00Z")
     assert row.early_upstream_feed_timestamp == row.origin_time
     assert row.early_allowance_seconds == 480
     assert row.early_implied_traversal_seconds == 510
-    assert row.early_scheduled_upstream_at == pd.Timestamp("2026-11-03 10:00Z")
+    assert row.early_scheduled_upstream_at == pd.Timestamp("2025-11-04 10:00Z")
     assert row.dwell_seconds == 60
     assert row.reference_traversal_seconds == 480
     assert row.reference_delay_reconstructed_traversal_seconds == 480
@@ -99,7 +99,7 @@ def test_earliest_timestamp_uses_greatest_id_without_advancing_to_later_reports(
     tie = updates.iloc[[1]].assign(
         id=99,
         arrival_delay=120,
-        arrival_time=pd.Timestamp("2026-11-03 10:10Z"),
+        arrival_time=pd.Timestamp("2025-11-04 10:10Z"),
     )
     result = prepare_early_traversal_comparison(
         pd.concat([updates, tie], ignore_index=True).iloc[::-1],
@@ -115,7 +115,7 @@ def test_equal_timestamp_without_ids_keeps_first_input_row():
     updates = _updates().drop(columns="id")
     tie = updates.iloc[[1]].assign(
         arrival_delay=120,
-        arrival_time=pd.Timestamp("2026-11-03 10:10Z"),
+        arrival_time=pd.Timestamp("2025-11-04 10:10Z"),
     )
     row = prepare_early_traversal_comparison(
         pd.concat([tie, updates], ignore_index=True),
@@ -128,8 +128,8 @@ def test_future_upstream_reports_do_not_enter_the_origin_estimate():
     updates = _updates()
     future = updates.iloc[[0]].assign(
         id=100,
-        feed_timestamp=pd.Timestamp("2026-11-03 08:00:01Z"),
-        arrival_time=pd.Timestamp("2026-11-03 10:20Z"),
+        feed_timestamp=pd.Timestamp("2025-11-04 08:00:01Z"),
+        arrival_time=pd.Timestamp("2025-11-04 10:20Z"),
         arrival_delay=1200,
     )
     row = prepare_early_traversal_comparison(
@@ -164,14 +164,14 @@ def test_missing_first_downstream_values_are_not_replaced_by_later_rows(column):
         )
     bad = result.observations.loc[result.observations.trip_id.eq("trip")].iloc[0]
     assert bad.comparison_exclusion_reason == f"missing_early_downstream_{column}"
-    assert bad.origin_time == pd.Timestamp("2026-11-03 08:00Z")
+    assert bad.origin_time == pd.Timestamp("2025-11-04 08:00Z")
 
 
 def test_missing_selected_upstream_delay_is_not_replaced_by_an_older_row():
     updates = _updates()
     older = updates.iloc[[0]].assign(
         id=0,
-        feed_timestamp=pd.Timestamp("2026-11-03 07:59Z"),
+        feed_timestamp=pd.Timestamp("2025-11-04 07:59Z"),
     )
     updates.loc[0, "arrival_delay"] = np.nan
     with pytest.warns(UserWarning, match="earliest traversal comparisons"):
@@ -231,11 +231,11 @@ def test_early_skipped_or_cancelled_reports_are_audited(column, value, reason):
 def test_negative_finite_early_predictions_are_retained_and_flagged():
     updates = _updates()
     updates.loc[0, ["arrival_time", "arrival_delay"]] = [
-        pd.Timestamp("2026-11-03 10:15Z"),
+        pd.Timestamp("2025-11-04 10:15Z"),
         900,
     ]
     updates.loc[1, ["arrival_time", "arrival_delay"]] = [
-        pd.Timestamp("2026-11-03 10:08Z"),
+        pd.Timestamp("2025-11-04 10:08Z"),
         0,
     ]
     row = prepare_early_traversal_comparison(updates, _segment()).observations.iloc[0]
@@ -250,7 +250,7 @@ def test_dated_instances_and_repeated_stop_sequences_do_not_mix():
     repeated["stop_sequence"] += 2
     for column in ("feed_timestamp", "arrival_time", "departure_time"):
         repeated[column] += pd.Timedelta(minutes=30)
-    next_day = updates.assign(trip_start_timestamp="2026-11-04 01:00:00").copy()
+    next_day = updates.assign(trip_start_timestamp="2025-11-05 01:00:00").copy()
     for column in ("feed_timestamp", "arrival_time", "departure_time"):
         next_day[column] += pd.Timedelta(days=1)
     result = prepare_early_traversal_comparison(
@@ -281,7 +281,7 @@ def test_conflicting_identity_and_no_eligible_origin_raise_explicitly():
 def test_zero_early_allowance_is_audited_without_replacing_schedule():
     updates = _updates()
     updates.loc[1, ["arrival_time", "arrival_delay"]] = [
-        pd.Timestamp("2026-11-03 10:01Z"),
+        pd.Timestamp("2025-11-04 10:01Z"),
         60,
     ]
     with pytest.warns(UserWarning, match="earliest traversal comparisons"):
@@ -294,8 +294,8 @@ def test_zero_early_allowance_is_audited_without_replacing_schedule():
 
 def test_origin_at_departure_is_not_a_predeparture_forecast():
     updates = _updates()
-    updates.loc[1, "feed_timestamp"] = pd.Timestamp("2026-11-03 10:03Z")
-    updates.loc[3, "feed_timestamp"] = pd.Timestamp("2026-11-03 10:06Z")
+    updates.loc[1, "feed_timestamp"] = pd.Timestamp("2025-11-04 10:03Z")
+    updates.loc[3, "feed_timestamp"] = pd.Timestamp("2025-11-04 10:06Z")
     with pytest.warns(UserWarning, match="earliest traversal comparisons"):
         result = prepare_early_traversal_comparison(
             _with_good_visit(updates), _segment()
@@ -327,7 +327,7 @@ def test_timeseries_plots_exact_scheduled_lead_in_second_shared_row():
     np.testing.assert_allclose(figure.data[3].y, [128])
     assert figure.data[3].yaxis == "y2"
     assert list(figure.data[0].x) == list(figure.data[3].x)
-    assert figure.data[3].x[0] == pd.Timestamp("2026-11-03 02:00")
+    assert figure.data[3].x[0] == pd.Timestamp("2025-11-04 02:00")
     assert figure.layout.xaxis.matches == "x2"
     assert figure.layout.xaxis2.rangeslider.visible
     assert figure.layout.yaxis.fixedrange is False

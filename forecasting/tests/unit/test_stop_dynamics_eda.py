@@ -446,11 +446,12 @@ def test_gaps_remain_missing_with_zero_support_not_zero_measurements():
 
 
 def test_utc_bins_distinguish_repeated_local_hour_at_dst_transition():
+    # 2025-11-02 is the last BC fall-back; BC has kept UTC-7 since 2026-03-08.
     first = _updates(
-        shift=pd.Timedelta(days=54) - pd.Timedelta("90min"), start="2026-11-01 00:30"
+        shift=pd.Timedelta(days=-310) - pd.Timedelta("90min"), start="2025-11-02 00:30"
     )
     second = _updates(
-        shift=pd.Timedelta(days=54) - pd.Timedelta("30min"), start="2026-11-01 01:30"
+        shift=pd.Timedelta(days=-310) - pd.Timedelta("30min"), start="2025-11-02 01:30"
     )
     result = _run(pd.concat([first, second], ignore_index=True))
     bins = result.delay_bins.query("pair_count > 0").index
