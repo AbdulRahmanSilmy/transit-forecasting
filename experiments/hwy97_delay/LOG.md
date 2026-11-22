@@ -277,6 +277,13 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
 - Verdict: **keep.** E010 stays the reference baseline. Keep `calendar_clock: "timetable"`: it is robust to a wrong local conversion and now equals the feed clock for almost every journey.
 - Next: unchanged (H8 #25, H9).
 
+### E013: anchor-free secondary score, baseline rescored
+
+- Purpose: owner decision (2026-11-22). Add the anchor-free score as a secondary metric (RESEARCH.md Metrics) and rescore the reference baseline, so H8 has an anchor-free comparison point.
+- Change: [b0a8101](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/b0a8101). Evaluation-only `actual_departure_delay_s` and `chain_anchor_delay_s` columns; `anchor_free_scores` in `score_predictions`; MLflow `anchor_free_*` metrics; printed table; anchor-free MAE in the LOG row. Two unit tests: a chain that is wrong only by its anchor scores 0, and an end-to-end run.
+- Prediction before running: primary scores identical to E010/E012 (harmonic 134.6 s, B3 136.4 s, same 27,742 rows). Anchor-free (from the E011 exploration, which included holiday rows): harmonic 116–119 s, B3 120–123 s, harmonic vs B3 −3 to −5 s; harmonic bias about −15 s, B3 about 0 s; fewer than 1% of rows without an actual departure.
+- Git: <pending>   MLflow run: <pending>
+
 <!-- Template for new entries:
 
 ### E0NN: <short title>
