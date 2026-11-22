@@ -16,6 +16,7 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 | E005 | 2026-11-21 | 2ba991b | H4 | dev: pooled_harmonic (60dd6de41dd34ac1835385a63a510b98) | 165.1 (B0 166.2) | -1.0 [-7.3, +4.4] (-0.6%) | +28.1 vs B3_calendar_median | discard |
 | E006 | 2026-11-21 | 714ceff | H4 | dev: pooled_harmonic_partial (f4dabda4739742f99091f28fc7051fed) | 146.4 (B0 166.2) | -19.8 [-25.5, -14.1] (-11.9%) | +9.4 vs B3_calendar_median | discard; H4 refuted |
 | E007 | 2026-11-21 | 98ddf13 | H3 | dev: harmonic_recent_level (b57247076a5a43e2a2ad5ebf8d14b4d3) | 138.5 (B0 166.2) | -27.6 [-35.2, -20.1] (-16.6%) | +1.5 vs B3_calendar_median | discard; H3 refuted at this history length |
+| E008 | 2026-11-22 | 7e8ec57 | #21 | dev: harmonic_huber (9e031ab3b21441eb9a4bc84b5cb3a5fa) | 134.6 (B0 166.3) | -31.7 [-38.9, -24.8] (-19.1%) | -2.5 vs B3_calendar_median | keep; untracked journeys excluded, baseline unchanged |
 
 ## Entries
 
@@ -160,6 +161,23 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Verdict: **discard; H3 refuted at the current 2-month history.** The ticket expected it to matter most with longer history (H2, blocked). That case remains untested.
 - Stop rule: E005, E006 and E007 are three consecutive runs without beating the best baseline (B3), so the session stops here, per the skill. 3 of 10 scored runs used.
 - Next: proposed **H8** (RESEARCH.md backlog): make traversal forecasts *mean*-unbiased, since chained delay sums them. H6 (anchor, #14) attacks the larger part of the same bias, about −100 s at the first stop, but needs a harness change.
+
+### E008: baseline rerun with untracked journeys excluded (#21)
+
+- Purpose: owner decision on #21. Journeys whose final reported delays are all exactly 0 s are untracked and excluded from scoring and training (`untracked_journey`). Rerun the current baseline (harmonic, E003) and the ladder on the new truth.
+- Prediction before running: dev rows drop by a few hundred visits (93 of 3,336 journeys are untracked, and the stale-report rule already removes many of their visits). B0 loses rows where it is exactly right (0 vs 0), so B0 MAE rises by about 1–4 s. Harmonic and B3 change by less than 2 s. The ranking (harmonic ≈ B3 < B0) stays the same.
+- Change: `untracked_journey` exclusion in `prepare_origin_visits` (harness change approved by the owner on #21), with a unit test.
+- Git: 7e8ec57 (clean; code change in be28f72)   MLflow run: 9e031ab3b21441eb9a4bc84b5cb3a5fa
+- Audit: 1,162 visits and 1,162 training links are flagged `untracked_journey`. The stale-report rule had already removed almost all of them: eligible scored visits fall from 39,973 (E007) to 39,916 (−57) and `stale_final_report` from 1,258 to 235; training links fall from 38,633 to 38,596 (−37).
+- Results (dev, **27,742** visits, −17 vs E003–E007; 0 unscorable for every method):
+  - **Delay MAE:** B0 166.3 s (was 166.2), B2 240.4 (240.5), B3 137.1 (137.0), **harmonic 134.6** (134.5).
+  - Harmonic vs B0: −31.7 s [−38.9, −24.8], −19.1%, win rate 0.63 (unchanged). −2.5 s vs B3 (unchanged).
+  - **By fold (harmonic / B3):** dev1 152.2 / 158.6, dev2 137.0 / 144.7, dev3 124.2 / 127.4, dev4 127.2 / 124.9, dev5 149.6 / 152.1, dev6 119.6 / 118.1. Harmonic still loses to B3 in dev4 and dev6.
+  - **Bias:** B0 −138.4 s, B3 −55.1, harmonic −71.2. **Traversal MAE:** harmonic 33.7 s (bias −1.3), B3 35.5; unchanged.
+- Sanity checks: leakage assertions passed; identical rows across methods; shuffled control passed (239.4 vs B2 240.4).
+- Interpretation: **prediction failed in size, not direction.** B0 rose, as expected, but by 0.1 s, not 1–4 s, because the 10-minute stale rule (#12) had already caught 95% of untracked visits. The exclusion is now explicit, so it no longer depends on those reports being published early, but it doesn't change any conclusion.
+- Verdict: **keep (truth definition).** All dev numbers from E008 on use it; E003–E007 differ by at most 0.1 s, so their comparisons stand. Harmonic (E008: 134.6 s) remains the baseline.
+- Next: H6 (#14) needs the owner to approve its harness change; otherwise H8 (#25), judged on per-segment × hour traversal bias.
 
 <!-- Template for new entries:
 
