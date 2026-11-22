@@ -203,6 +203,17 @@ Scores are **development folds only** unless the entry is marked `LOCKED TEST` (
 - Verdict: **discard (calendar-median anchor); H6 refuted in this form.** Keep the `--anchor` option (default `feed`) for future anchor models. Harmonic with the feed anchor (E008: 134.6 s) stays the baseline.
 - Next: proposed **H9** (dwell mean bias, needs a harness change) and H8 (#25, traversal mean bias) attack the growing part of the bias. A refined anchor would need training data free of the stale-report selection, e.g. implied departures from fresh stop-2 arrivals.
 
+### E010: stale first-stop departures train the first link (truth fix)
+
+- Purpose: owner-approved harness fix (2026-11-21). The stale-report rule also dropped training links whose **upstream** departure report was stale. At the first stop, that removed about 40% of journeys from stop 1 → 2 training, mostly on-time leavers.
+- Diagnostic before the change (dev window, not a scored run): vehicle positions as an independent check. Departure from stop k = first ping past k (bracketed by the previous ping, gaps ≤ 60 s); arrival = first ping `STOPPED_AT` k or past k.
+  - **Method check, fresh reports:** arrivals agree with vehicles within 30 s / 60 s in 97% / 99.9% (n = 36,252); departures 88% / 98% (n = 38,136); stop-1 departures 52% / 88% (median feed − vehicle −28 s).
+  - **Stale stop-1 departures** (1,312; 99.8% report exactly 0 s): vehicles show 99% left between −60 and +120 s (median 24 s late); the 0 s value is within 60 s of the vehicle in 91%, at least as good as fresh stop-1 reports. **Wrongly dropped.**
+  - **Stale reports at stops 2–14** (318 arrivals, 296 departures; about 0.8%): only 53 each have pings, and **none** is within 60 s of the vehicle (median error about 26 min, some about 1 h, likely the #13 trip-label offset). Even the 0 s ones are wrong. **Correctly dropped.**
+- Change: in `prepare_origin_visits`, the stale rule no longer applies to the upstream departure when it is the journey's first stop. Scored visits are unchanged (they only check the arrival report). Unit test added.
+- Prediction before running: training links +about 1,280 (`stale_final_report` 1,567 → about 290), and stop 1 → 2 traversal-scoring rows 1,285 → about 2,150. Scored delay rows unchanged (27,742). On-time leavers take slightly less time on that link (stop-2 delay minus departure delay: median 66 s vs 73 s), so link-1 forecasts drop by a few seconds and every chained forecast moves slightly earlier. Delay bias becomes 2–5 s more negative, and harmonic delay MAE changes by −1 to +3 s (E008: 134.6). This is a correctness fix; keep it whatever the score.
+- Git: <pending>   MLflow run: <pending>
+
 <!-- Template for new entries:
 
 ### E0NN: <short title>

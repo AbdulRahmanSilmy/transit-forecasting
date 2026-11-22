@@ -224,6 +224,21 @@ def test_stale_final_report_is_not_used_as_truth():
     assert links[4] == "stale_final_report"
 
 
+def test_stale_first_stop_departure_still_trains_the_first_link():
+    updates = pd.DataFrame(_journey("a", "2026-10-01 15:00"))
+    final = updates["feed_timestamp"].eq(updates["feed_timestamp"].max())
+    # Stop 1's latest report is now its origin estimate: an on-time departure.
+    prepared = _prepare(updates.loc[~(final & updates["stop_sequence"].eq(1))])
+    links = prepared.links.set_index("stop_sequence")
+    assert links.loc[2, "train_exclusion_reason"] == "included"
+    assert links.loc[2, "traversal_seconds"] == 280
+    # A stale departure at any later stop still excludes its downstream link.
+    prepared = _prepare(updates.loc[~(final & updates["stop_sequence"].eq(2))])
+    reasons = prepared.links.set_index("stop_sequence")["train_exclusion_reason"]
+    assert reasons[2] == "stale_final_report"
+    assert reasons[3] == "stale_final_report"
+
+
 def test_journey_with_every_final_delay_zero_is_untracked():
     # Journey "a" runs exactly to schedule, as a schedule-only feed reports it.
     untracked = _journey(

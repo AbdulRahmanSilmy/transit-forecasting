@@ -290,6 +290,9 @@ def prepare_origin_visits(
     unless that report was published more than
     ``max_final_report_age_minutes`` before the arrival it describes: such a
     report is an un-updated prediction, so the visit is excluded as stale.
+    The same rule applies to both ends of a training link, except a
+    first-stop departure: the feed leaves an on-time departure at its origin
+    estimate, which vehicle positions confirm (E010), so that end is kept.
     A journey whose final reported arrival and departure delays are all
     exactly 0 s is untracked (schedule-only estimates, issue #21); all its
     visits and links are excluded as ``untracked_journey``.
@@ -609,8 +612,14 @@ def prepare_origin_visits(
                 "stale_final_report",
                 stale_arrival.loc[links.index]
                 | (
-                    upstream["final_departure_time"] - upstream["final_feed_timestamp"]
-                ).gt(max_age),
+                    (
+                        upstream["final_departure_time"]
+                        - upstream["final_feed_timestamp"]
+                    ).gt(max_age)
+                    # A first-stop departure left at its origin estimate is an
+                    # on-time departure, not an old prediction (vehicle check, E010).
+                    & ~links["upstream_is_first_stop"]
+                ),
             ),
             ("nonpositive_traversal", links["traversal_seconds"].le(0)),
         ],
