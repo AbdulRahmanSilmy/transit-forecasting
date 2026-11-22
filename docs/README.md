@@ -5,8 +5,21 @@ with the [project README](../README.md) for setup, and the
 [notebook guide](../notebooks/README.md) for which notebook to read first and
 what each signal means.
 
+## System
+
+- [Architecture](architecture.md): how data flows from the feed through the
+  Pi, MySQL and R2 to analyses and studies, and where each piece lives.
+- [Operations runbook](operations.md): setting up, deploying to and fixing the
+  ingestion stack on the Raspberry Pi.
+- Package READMEs: [data_ingestion](../data_ingestion/README.md) (service,
+  configuration, archive and retention commands) and
+  [forecasting](../forecasting/README.md) (install, tests, module map).
+
 ## Data
 
+- [GTFS-Realtime data reference](gtfs-rt-data.md): what each stored column
+  means, time zones and clocks, how to identify journeys, and the known
+  quirks to handle before trusting a result.
 - [Historical backtest data](backtest-data.md): offline snapshots under
   `data/backtests/`, the R2 Parquet archive, custom MySQL downloads and the
   `get_backtest_dataset` API.

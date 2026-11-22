@@ -1,74 +1,100 @@
 # Transit Forecasting
 
-## Overview
-Tools and data pipelines for transit forecasting and GTFS-realtime ingestion.
+Bus delay forecasting for BC Transit in Kelowna, built on our own archive of
+its GTFS-Realtime feed.
+
+A Raspberry Pi records the feed every 5 seconds and archives each day to
+Cloudflare R2. The `forecasting` package turns that history into analyses and
+models. Research studies test whether those models predict arrival delays
+better than BC Transit's own published estimates. The first study,
+[hwy97_delay](experiments/hwy97_delay/RESEARCH.md), covers Route 97 along
+Highway 97.
+
+```mermaid
+flowchart LR
+    feed["BC Transit<br/>GTFS-Realtime"] --> ing["Ingestion<br/>(Pi)"] --> mysql[("MySQL<br/>recent days")]
+    mysql --> r2[("R2 Parquet<br/>full history")]
+    r2 --> fc["forecasting<br/>package"]
+    fc --> nb["notebooks"]
+    fc --> exp["experiments"] --> mlflow[("MLflow")]
+```
+
+See [docs/architecture.md](docs/architecture.md) for the full picture.
+
+## Repository layout
 
 | Directory | Contents |
 |-----------|----------|
-| [data_ingestion/](data_ingestion) | GTFS-realtime ingestion service, MySQL storage and the nightly R2 Parquet archive |
-| [forecasting/](forecasting) | `forecasting` package: backtest data loading, congestion engines, delay analyses and models |
-| [notebooks/](notebooks) | Analysis notebooks; see the [notebook guide](notebooks/README.md) |
-| [experiments/](experiments) | Research studies (charter, log and evaluation harness) |
-| [docs/](docs) | Workflow and analysis documentation; see the [docs index](docs/README.md) |
-| `data/` | Local snapshots and generated outputs (ignored by Git) |
+| [data_ingestion/](data_ingestion) | GTFS-Realtime ingestion service, MySQL storage and the nightly R2 archive ([README](data_ingestion/README.md)) |
+| [forecasting/](forecasting) | `forecasting` package: data loading, congestion and delay analyses, models and the study harness ([README](forecasting/README.md)) |
+| [notebooks/](notebooks) | Analysis notebooks ([notebook guide](notebooks/README.md)) |
+| [experiments/](experiments) | Research studies: charter, log and evaluation harness |
+| [docs/](docs) | Architecture, data reference, operations and analysis docs ([index](docs/README.md)) |
+| `data/` | Local snapshots, generated outputs and the MLflow store (ignored by Git) |
 
 ## Documentation
 
-- [Notebook guide](notebooks/README.md): each analysis's purpose, recommended
-  reading order, inputs, outputs and interpretation limits.
-- [Historical backtest data](docs/backtest-data.md): offline snapshots, the R2
-  archive and MySQL downloads.
-- [Database download scaling benchmark](docs/download-benchmark.md)
-- Analyses: [congestion maps](docs/congestion-maps.md),
-  [stop-delay feasibility](docs/stop-delay-feasibility.md),
-  [recurring segment delay prediction](docs/segment-delay-prediction.md),
-  [stop dynamics EDA](docs/stop-dynamics-eda.md)
-- [Agent research loop](docs/agent-research-loop.md)
+| If you want to… | Read |
+|---|---|
+| Understand how the pieces fit | [Architecture](docs/architecture.md) |
+| Know what a column means or why a number looks wrong | [GTFS-Realtime data reference](docs/gtfs-rt-data.md) |
+| Load historical data into a notebook | [Historical backtest data](docs/backtest-data.md) |
+| Deploy to or fix the Pi | [Operations runbook](docs/operations.md) |
+| Pick a notebook to read | [Notebook guide](notebooks/README.md) |
+| See how research studies are run | [Agent research loop](docs/agent-research-loop.md) |
+| Browse every doc | [Docs index](docs/README.md) |
 
-## Development Setup
+## Development setup
 
-### Python Environment
-Use your preferred Python environment manager (conda, venv). Example with conda:
+### Python environment
 
-```
-conda create -n transit_env python=3.11
-conda activate transit_env
-```
-
-Install Python dependencies:
-
-```
-pip install -r requirements.txt
-```
-
-The root requirements file includes the data ingestion requirements. The
-analysis notebooks also need the forecasting package's model dependencies:
+Use your preferred environment manager. With conda:
 
 ```bash
-conda run -n transit_env python -m pip install -e ./forecasting
+conda create -n transit_env python=3.11
+conda activate transit_env
+pip install -r requirements.txt                   # both packages (editable), Jupyter, pre-commit
+pip install -e "./forecasting[tracking]"          # MLflow, for study runs
 ```
+
+Run both commands from the repository root.
+
+Keep the environment's `tzdata` current. British Columbia has been on UTC−7
+all year since 2026-03-08, and an older timezone database converts local times
+wrongly from 2026-11-01 onwards
+([issue #13](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/13)).
 
 ### Tests
 
-Use `pytest` for tests. Each package has its own unit tests; run them from the
-package directory:
+Each package has its own tests. Run them from the package directory, because
+running from the repository root fails on imports:
 
 ```bash
 cd forecasting      # or data_ingestion
 conda run -n transit_env python -m pytest tests/unit -q
 ```
 
-See [Integration Tests In Docker](#integration-tests-in-docker) for the MySQL
-ingestion tests.
+The MySQL integration tests run in Docker; see the
+[data_ingestion README](data_ingestion/README.md#tests).
 
-### Pre-commit Hooks
-Install the git hook:
+### Pre-commit hooks
 
-```
+```bash
 pre-commit install
 ```
 
-## Viewing Experiment Results (MLflow)
+The hooks run black, isort, ruff and basic whitespace and YAML checks.
+
+### Contributing
+
+- Commit messages start with a type prefix (`Add:`, `Fix:`, `Refactor:`,
+  `Test:`, `Docs:`, `Chore:`, `Revert:`); see [AGENTS.md](AGENTS.md).
+- Work items are GitHub issues. Use the issue templates: experiment, decision,
+  or ops and bug.
+- Research study rules (frozen harness, locked test period, logging every
+  run) are in [AGENTS.md](AGENTS.md#research-loop).
+
+## Viewing experiment results (MLflow)
 
 Research harness runs (for example
 [experiments/hwy97_delay/evaluate.py](experiments/hwy97_delay/evaluate.py)) log
@@ -92,63 +118,13 @@ runs this automatically when the folder opens. Allow it once via
 starting if port 5000 is already taken. Run it manually with
 *Tasks: Run Task* → *MLflow UI*, and stop it by closing its terminal.
 
-The store only exists after at least one harness run; each
-study's `LOG.md` cites the MLflow run ID for every logged result, and its
-`HARNESS.md` lists what each run records.
+The store only exists after at least one harness run. Each study's `LOG.md`
+cites the MLflow run ID for every logged result, and its `HARNESS.md` lists
+what each run records.
 
-## Data Ingestion
-The ingestion scripts live under [data_ingestion/](data_ingestion), and [data_ingestion/config.yaml](data_ingestion/config.yaml) defines the configuration. It pulls environmental variables from a `.env` file. To run the code, use [.env.example](data_ingestion/.env.example) as a reference for what to include in your `.env` file.
+## Data ingestion
 
-### Docker
-The Docker Compose file is in [data_ingestion/docker-compose.yml](data_ingestion/docker-compose.yml). Run it from the `data_ingestion` directory:
-
-```bash
-cd data_ingestion
-docker compose up --build
-```
-
-This starts MySQL, phpMyAdmin, and the data ingestion service.
-
-### Integration Tests In Docker
-Run integration tests inside Docker so MySQL host resolution matches the Compose network:
-
-```bash
-cd data_ingestion
-./run_integration_tests.sh
-```
-
-This runs `tests/integration/` with `RUN_INTEGRATION_TESTS=1` inside the container and restores MySQL to its original state (stops it afterward only if the script had to start it).
-
-### Archive To Cloudflare R2
-`python -m data_ingestion.archive` copies complete UTC days of both realtime tables to R2 as zstd Parquet files, `archive/<table>/date=YYYY-MM-DD/data.parquet`, sorted by route and direction. Each upload's row count is checked against MySQL; days already in R2 are skipped unless `--overwrite` is given.
-
-```bash
-cd data_ingestion
-pip install ".[archive]"
-python -m data_ingestion.archive --env-file ../.env                # all complete days not yet archived
-python -m data_ingestion.archive --start 2026-11-01 --end 2026-11-08 --table trip_updates
-```
-
-Settings come from `--env-file` and the environment: MySQL as `TRANSIT_DB_*` (laptop) or `MYSQL_*` (the Docker `.env`), plus `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`. `--end` is exclusive and cannot be later than today (UTC), so the current partial day is never archived.
-
-### Nightly Export And MySQL Retention
-The `archive` Compose service runs `python -m data_ingestion.nightly`: at start-up and then every night at `ARCHIVE_RUN_AT_UTC` (default `10:00`, when the feed is quietest: 2–3 a.m. in Kelowna) it archives every complete UTC day not yet in R2, so a missed night catches up on the next run. Failures are logged to the container logs (`docker compose logs archive`) and retried after an hour.
-
-Set these in `data_ingestion/.env` (never commit it):
-
-| Setting | Purpose |
-|---|---|
-| `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | R2 destination (required) |
-| `ARCHIVE_RUN_AT_UTC` | Daily run time, `HH:MM` UTC (optional) |
-| `ARCHIVE_RETAIN_DAYS` | When set, delete MySQL days older than this many complete days after each export (optional; unset keeps everything) |
-
-`python -m data_ingestion.retention` removes archived rows. A UTC day is removed only when its R2 file exists and its row count equals MySQL's; anything else is kept and logged.
-
-```bash
-docker compose up -d --build archive
-docker compose exec archive python -m data_ingestion.retention check --retain-days 14   # read-only report
-docker compose exec archive python -m data_ingestion.retention compact --retain-days 14 # one-time shrink
-docker compose exec archive python -m data_ingestion.retention drop-backup --yes        # irreversible
-```
-
-`prune` (what the nightly run does) deletes in small batches; InnoDB reuses that space, so the files stop growing but do not shrink. To reclaim the space already used, run `compact` once: it copies the retained rows into a new table while ingestion keeps writing, briefly locks both tables to copy the last rows and swap them with `RENAME TABLE`, and keeps the original as `<table>_pre_compact`. Dropping that backup frees the disk space and cannot be undone. Compaction needs free disk for the retained rows (about 2 GB for 14 days) and refuses to run if any older day is not verified in R2.
+The ingestion service, its configuration, the R2 archive and MySQL retention
+are documented in the [data_ingestion README](data_ingestion/README.md).
+Running it on the Pi is covered in the
+[operations runbook](docs/operations.md).
