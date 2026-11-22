@@ -21,6 +21,7 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
 | E008 | 2026-11-22 | [7e8ec57](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/7e8ec57) | [#21](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/21) | dev: harmonic_huber ([9e031ab3b21441eb9a4bc84b5cb3a5fa](http://127.0.0.1:5000/#/experiments/1/runs/9e031ab3b21441eb9a4bc84b5cb3a5fa)) | 134.6 (B0 166.3) | -31.7 [-38.9, -24.8] (-19.1%) | -2.5 vs B3_calendar_median | keep; untracked journeys excluded, baseline unchanged |
 | E009 | 2026-11-22 | [b838ef7](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/b838ef7) | H6 ([#14](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/14)) | dev: harmonic_huber + calendar_median anchor ([17781bc9f5d145fe93d8558d478515ee](http://127.0.0.1:5000/#/experiments/1/runs/17781bc9f5d145fe93d8558d478515ee)) | 136.3 (B0 166.3) | -30.0 [-38.0, -21.9] (-18.0%) | -4.6 vs B3_calendar_median | discard; bias removed (+2.8 s) but MAE +1.7 vs E008 |
 | E010 | 2026-11-22 | [7980583](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/7980583) | [#12](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/12) | dev: harmonic_huber ([20ccac3e2f11424598521a00fc921fe5](http://127.0.0.1:5000/#/experiments/1/runs/20ccac3e2f11424598521a00fc921fe5)) | 134.6 (B0 166.3) | -31.7 [-38.8, -25.0] (-19.1%) | -1.8 vs B3_calendar_median | keep; stale first-stop departures train link 1 (+1,297 links), new reference baseline |
+| E011 | 2026-11-22 | [650edbc](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/650edbc) | H8 ([#25](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/25)) | exploration only ([b010f8bef5fd41f986c91aa7b1584481](http://127.0.0.1:5000/#/experiments/1/runs/b010f8bef5fd41f986c91aa7b1584481)) | n/a | n/a | n/a | design and prediction registered; scored run pending |
 
 ## Entries
 
@@ -227,6 +228,32 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
 - Interpretation: **prediction held.** The row counts landed as predicted (+1,297 links, seq 2 at 2,168 rows). Bias moved 2.8 s earlier (predicted 2–5 s), and harmonic delay MAE didn't change (predicted −1 to +3 s). B3 gained 0.7 s. The stop 1 → 2 model now learns from on-time leavers too and scores better on that link. The score barely moves because the early bias that remains comes from the anchor, which is out of scope, and from per-link mean bias (H8, H9).
 - Verdict: **keep (truth fix).** E010 replaces E008 as the reference baseline: harmonic 134.6 s, B3 136.4 s.
 - Next: H8 (#25) or H9 (mean dwell, needs a harness change). Both are measured against E010.
+
+### E011: exploration for H8 (mean-unbiased traversal, #25); scored run pending
+
+- Hypothesis: H8. Chained delay needs mean-unbiased traversal forecasts; a per-segment × hour correction from training residuals lowers delay MAE.
+- Exploration (first use of the `experiment-plots` skill), on E010's dev artifacts only. Exploration run: [b010f8bef5fd41f986c91aa7b1584481](http://127.0.0.1:5000/#/experiments/1/runs/b010f8bef5fd41f986c91aa7b1584481) (9 figures, 3 of them corrected v2s; the question → observation → next trail is in `journal.md`).
+
+  1. **Where the bias comes from.** Harmonic's delay bias (−47 s at stop 2 → −104 s at stop 14) is a flat anchor offset of −49 to −58 s, plus dwell bias in **two steps**: −28 s from the dwell at stop 6 and −22 s from the dwell at stop 10. Cumulative traversal bias wanders between +24 and −10 s and nets to −9.5 s.
+
+     ![Bias decomposition by stop](figures/E011/02_bias_decomposition_by_stop_v2.png)
+
+  2. **Why stops 6 and 10:** timepoint holding. Early buses wait out the schedule, so dwell ≈ constant − arrival delay (slope −1). At stop 6, 37% of buses arrive > 30 s early (median dwell 151 s vs 62 s); at stop 10, 15% (75 s vs 30 s). Mean ≈ median dwell at every other stop. A constant mean dwell (proposed H9) would over-hold late buses and under-hold early ones. This is H7's mechanism (#15).
+
+     ![Dwell vs arrival delay at stops 6 and 10](figures/E011/05_dwell_vs_arrival_delay_stops_6_10_v2.png)
+
+  3. **Traversal bias is structured, mixed in sign, and only partly stable.** In the 13–17 h peak, links → 2 and → 6 are too slow by +25 to +40 s, and links → 8 to 10 too fast by −20 to −40 s; 60 of 243 segment × hour cells exceed ±10 s. Across folds, links → 2 (+16 to +33 s) and → 8 (−14 to −20 s) are stable. Link → 6 shrinks from +75 to +24 s as history grows. Links → 9 and → 10 swing from −73 to +19 s. A smearing ratio (right-skew correction) would push every link up and make links 2 and 6 worse.
+
+     ![Peak-hour traversal bias by fold](figures/E011/07_pm_peak_bias_by_fold.png)
+
+  4. **The anchor confounds delay MAE.** With the out-of-scope anchor error removed (actual stop-1 departure reconstructed as the stop-2 arrival minus the actual stop 1 → 2 traversal), harmonic delay MAE is 117.7 s (scored 135.7) with bias −14.6 s (scored −68.8); B3 is 121.6 s (138.2), bias +0.6 s. A per-link fix that removes positive traversal bias (e.g. link 2) moves forecasts earlier, on top of the anchor offset, so it can score worse while being better within scope.
+
+     ![Delay MAE with the anchor error removed](figures/E011/09_delay_mae_anchor_free_by_stop_v2.png)
+
+- Design decided from the plots: H8 as an **additive** per-segment × hour residual correction (training mean of actual − harmonic per cell, shrunk towards the segment mean for cells with few links), not a smearing ratio. Judge it first on traversal bias by segment × hour and traversal MAE, and report delay MAE both as scored and anchor-free (exploratory).
+- Prediction (pre-registered, before any H8 code): traversal MAE 33.7 → 32.5–33.5 s, with the stable cells (→ 2, → 8 in the peak) close to 0. Scored delay MAE −2 to +2 s vs E010 (134.6): removing link 2's positive bias adds to the anchor offset. Anchor-free delay MAE improves by 1–4 s. The unstable links (→ 9, → 10) stay biased.
+- Git: [650edbc](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/650edbc) (exploration code)   MLflow run: scored run pending; exploration [b010f8bef5fd41f986c91aa7b1584481](http://127.0.0.1:5000/#/experiments/1/runs/b010f8bef5fd41f986c91aa7b1584481)
+- Next: implement and score H8 when the owner agrees. The plots point to bigger levers: **H7** (holding at stops 6 and 10; needs a harness change) and an **anchor-free delay metric** to match the scope decision (owner decision; changes the success criterion).
 
 <!-- Template for new entries:
 
