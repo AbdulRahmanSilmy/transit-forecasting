@@ -111,6 +111,10 @@ from .trip_dynamics_eda import (
     prepare_trip_dynamics_eda,
     select_trip_dynamics_examples,
 )
+from .trip_start_recovery import (
+    fill_missing_trip_starts,
+    fill_missing_vehicle_trip_starts,
+)
 from .trip_updates import (
     get_latest_stop_delays,
     get_stop_delay_horizons,
@@ -118,6 +122,8 @@ from .trip_updates import (
 )
 
 __all__ = [
+    "fill_missing_trip_starts",
+    "fill_missing_vehicle_trip_starts",
     "journey_timetable_offsets",
     "timetable_offset_summary",
     "OriginVisits",

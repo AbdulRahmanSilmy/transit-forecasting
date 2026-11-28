@@ -21,6 +21,12 @@ from .backtest_cache import (
 )
 from .r2_archive import load_archive_updates
 from .static_gtfs import download_static_gtfs
+from .trip_start_recovery import (
+    TRIP_UPDATE_COLUMNS,
+    VEHICLE_UPDATE_COLUMNS,
+    fill_missing_trip_starts,
+    fill_missing_vehicle_trip_starts,
+)
 
 _CONNECTION_ENV_VARS = {
     "host": "TRANSIT_DB_HOST",
@@ -178,6 +184,7 @@ def get_backtest_dataset(
     archive_end: str | pd.Timestamp | None = None,
     route_id: str | None = None,
     direction_id: int | None = None,
+    recover_trip_starts: bool = True,
 ) -> BacktestDataset:
     """Load a saved backtest or build and cache a new snapshot.
 
@@ -226,6 +233,15 @@ def get_backtest_dataset(
     route_id, direction_id : str or int or None, optional
         Optional ``trip_route_id`` and ``trip_direction_id`` filters for R2
         mode, applied to both tables.
+    recover_trip_starts : bool, default True
+        Fill the null ``trip_start_timestamp`` of post-midnight trips stored
+        before data_ingestion 0.4.1 (issue #36) with
+        :func:`~forecasting.trip_start_recovery.fill_missing_trip_starts` and
+        :func:`~forecasting.trip_start_recovery.fill_missing_vehicle_trip_starts`.
+        Each returned table then gains a boolean ``trip_start_recovered``
+        column; a table without the columns recovery needs (for example from
+        a custom query) is returned as loaded. Saved snapshots always keep the
+        descriptors as stored.
 
     Returns
     -------
@@ -275,7 +291,10 @@ def get_backtest_dataset(
                 _get_available_dataset_directory(cache_dir, dataset_id)
             except FileExistsError:
                 cached = get_backtest_dataset(
-                    data_root, source="cache", dataset_id=dataset_id
+                    data_root,
+                    source="cache",
+                    dataset_id=dataset_id,
+                    recover_trip_starts=recover_trip_starts,
                 )
                 _check_saved_window(cached.directory, archive_start, archive_end)
                 return cached
@@ -346,6 +365,12 @@ def get_backtest_dataset(
         )
     else:
         raise ValueError("Choose source: 'cache', 'r2', or 'download'.")
+    if recover_trip_starts and set(TRIP_UPDATE_COLUMNS) <= set(trip_updates):
+        trip_updates = fill_missing_trip_starts(trip_updates)
+        if set(VEHICLE_UPDATE_COLUMNS) <= set(vehicle_updates):
+            vehicle_updates = fill_missing_vehicle_trip_starts(
+                vehicle_updates, trip_updates
+            )
     return BacktestDataset(directory, vehicle_updates, trip_updates)
 
 

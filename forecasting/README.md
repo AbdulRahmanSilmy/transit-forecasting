@@ -44,7 +44,7 @@ exported from [\_\_init\_\_.py](forecasting/__init__.py).
 | Area | Modules | Purpose |
 |---|---|---|
 | Data access | `backtest_data`, `backtest_cache`, `r2_archive`, `static_gtfs`, `benchmark_download_speed` | Load, cache and benchmark historical realtime data (R2 Parquet, MySQL, local snapshots) and static GTFS |
-| Feed utilities | `trip_updates`, `feed_clock` | Select trip updates and match them to vehicle positions; measure each journey's offset between feed schedule and timetable |
+| Feed utilities | `trip_updates`, `feed_clock`, `trip_start_recovery` | Select trip updates and match them to vehicle positions; measure each journey's offset between feed schedule and timetable; fill start descriptors lost for post-midnight trips (#36) |
 | Hwy 97 study harness (**protected**) | `delay_forecast_eval`, `delay_forecast_display`, `experiment_tracking` | Origin-time delay forecasting harness, its run figures and MLflow logging. Do not edit without owner approval (see [HARNESS.md](../experiments/hwy97_delay/HARNESS.md)) |
 | Study exploration | `exploration_tracking` | Exploratory-plot sessions logged to MLflow (`experiment-plots` skill); not part of the protected harness |
 | Study candidates | `traversal_models`, `anchor_models`, `harmonic_regression` | Traversal-time models (register in `make_traversal_model`), first-stop anchor models (register in `make_anchor_model`) and the calendar harmonic regressor they use |
