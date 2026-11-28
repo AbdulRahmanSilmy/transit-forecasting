@@ -500,7 +500,9 @@ def test_get_dataset_r2_replays_existing_snapshot_without_archive_access(
     )
 
     assert result is replay.return_value
-    replay.assert_called_once_with(tmp_path, source="cache", dataset_id="saved")
+    replay.assert_called_once_with(
+        tmp_path, source="cache", dataset_id="saved", recover_trip_starts=True
+    )
     for operation in dataset_downloads:
         operation.assert_not_called()
 
@@ -551,3 +553,57 @@ def test_get_dataset_r2_rejects_saved_snapshot_from_another_window(
 def test_get_dataset_r2_requires_window(tmp_path: Path, dataset_downloads) -> None:
     with pytest.raises(ValueError, match="archive_start and archive_end"):
         get_backtest_dataset(tmp_path, source="r2", archive_start="2026-09-01")
+
+
+def _post_midnight_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
+    # Stored before data_ingestion 0.4.1: 00:14 local (07:14 UTC) has no descriptor.
+    trip = pd.DataFrame(
+        {
+            "id": [1],
+            "feed_timestamp": pd.to_datetime(["2026-11-05 07:00"]),
+            "trip_id": ["late"],
+            "trip_start_timestamp": pd.to_datetime([None]),
+            "stop_sequence": [1],
+            "arrival_time": pd.to_datetime(["2026-11-05 07:15"]),
+            "arrival_delay": [60],
+            "departure_time": pd.to_datetime(["2026-11-05 07:15"]),
+            "departure_delay": [60],
+        }
+    )
+    vehicle = pd.DataFrame(
+        {
+            "trip_id": ["late"],
+            "trip_start_timestamp": pd.to_datetime([None]),
+            "timestamp": pd.to_datetime(["2026-11-05 07:20"]),
+            "feed_timestamp": pd.to_datetime(["2026-11-05 07:20"]),
+        }
+    )
+    return vehicle, trip
+
+
+@pytest.mark.parametrize("recover", [True, False])
+def test_get_dataset_recovers_post_midnight_trip_starts(
+    tmp_path: Path, monkeypatch, recover: bool
+) -> None:
+    vehicle, trip = _post_midnight_tables()
+    monkeypatch.setattr(
+        backtest_data,
+        "list_backtest_datasets",
+        Mock(return_value=pd.DataFrame({"dataset_id": ["saved"]})),
+    )
+    monkeypatch.setattr(
+        backtest_data, "load_backtest_dataset", Mock(return_value=(vehicle, trip))
+    )
+
+    result = get_backtest_dataset(tmp_path, recover_trip_starts=recover)
+
+    if recover:
+        expected = pd.Timestamp("2026-11-05 00:14")
+        assert result.trip_updates["trip_start_timestamp"].iloc[0] == expected
+        assert result.vehicle_updates["trip_start_timestamp"].iloc[0] == expected
+        assert result.trip_updates["trip_start_recovered"].all()
+        assert result.vehicle_updates["trip_start_recovered"].all()
+    else:
+        assert result.trip_updates is trip
+        assert result.vehicle_updates is vehicle
+    assert trip["trip_start_timestamp"].isna().all()

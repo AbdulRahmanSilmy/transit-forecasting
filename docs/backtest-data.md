@@ -51,6 +51,11 @@ from forecasting import get_backtest_dataset
 dataset = get_backtest_dataset("data", source="cache", dataset_id=None)
 ```
 
+By default it fills the null `trip_start_timestamp` of post-midnight trips
+stored before data_ingestion 0.4.1 and adds a boolean `trip_start_recovered`
+column to both tables (issue #36). The saved snapshot keeps the descriptors as
+stored; pass `recover_trip_starts=False` to get them unchanged.
+
 ## R2 archive (default for notebooks)
 
 The full realtime history lives in a Cloudflare R2 bucket as one zstd Parquet
