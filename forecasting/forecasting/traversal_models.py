@@ -456,6 +456,13 @@ class ResidualHourCorrection:
     ratio (smearing) factor, the correction can be negative, so cells the base
     model over-predicts move down.
 
+    With ``centred=True`` the segment's level is removed and only the hour
+    shape within the segment is kept: the correction is
+    ``n / (n + k) * (cell_mean - segment_mean)``, the cell's deviation from
+    its segment shrunk towards 0. Over a segment's training links the
+    corrections then average to about 0, so the model can't shift a whole
+    segment up or down (E017, option (c) on H8).
+
     Parameters
     ----------
     base : TraversalModel
@@ -463,7 +470,10 @@ class ResidualHourCorrection:
     timezone : str, default "America/Vancouver"
         Calendar timezone for the hour.
     shrinkage : float, default 30
-        Pseudo-count ``k`` pulling a cell's mean towards its segment's mean.
+        Pseudo-count ``k`` pulling a cell's mean towards its segment's mean
+        (or, when centred, its deviation towards 0).
+    centred : bool, default False
+        Keep only the within-segment hour shape (see above).
     """
 
     def __init__(
@@ -471,10 +481,12 @@ class ResidualHourCorrection:
         base: TraversalModel,
         timezone: str = "America/Vancouver",
         shrinkage: float = 30.0,
+        centred: bool = False,
     ) -> None:
         self.base = base
         self.timezone = timezone
         self.shrinkage = shrinkage
+        self.centred = centred
 
     def _hours(self, frame: pd.DataFrame) -> np.ndarray:
         """Local hour of the scheduled upstream departure."""
@@ -513,6 +525,8 @@ class ResidualHourCorrection:
         self.corrections_ = (cells["size"] * cells["mean"] + self.shrinkage * prior) / (
             cells["size"] + self.shrinkage
         )
+        if self.centred:
+            self.corrections_ = self.corrections_ - prior
         return self
 
     def predict(self, requests: pd.DataFrame) -> np.ndarray:
@@ -528,14 +542,18 @@ class ResidualHourCorrection:
         -------
         numpy.ndarray
             Seconds; NaN wherever the base model returns NaN. Unseen cells use
-            the segment's mean residual; unseen segments get no correction.
+            the segment's mean residual (0 when centred); unseen segments get
+            no correction.
         """
         index = pd.MultiIndex.from_arrays(
             [requests["segment_key"].to_numpy(), self._hours(requests)]
         )
         correction = self.corrections_.reindex(index).to_numpy(dtype=float)
-        segment = requests["segment_key"].map(self.segment_means_).to_numpy(dtype=float)
-        correction = np.where(np.isnan(correction), segment, correction)
+        if not self.centred:
+            segment = requests["segment_key"].map(self.segment_means_)
+            correction = np.where(
+                np.isnan(correction), segment.to_numpy(dtype=float), correction
+            )
         correction = np.nan_to_num(correction, nan=0.0)
         return np.asarray(self.base.predict(requests), dtype=float) + correction
 
@@ -608,7 +626,9 @@ def make_traversal_model(name: str, timezone: str) -> TraversalModel:
         deviations penalised at ``alpha=0.01``) or ``'harmonic_recent_level'``
         (``harmonic_huber`` plus a trailing 14-day per-segment level offset)
         or ``'harmonic_residual_hour'`` (``harmonic_huber`` plus an additive
-        per-segment x hour training-residual mean, shrinkage 30).
+        per-segment x hour training-residual mean, shrinkage 30) or
+        ``'harmonic_residual_hour_centred'`` (the same with the segment mean
+        removed, so only the within-segment hour shape is added).
     timezone : str
         Calendar timezone.
 
@@ -636,4 +656,8 @@ def make_traversal_model(name: str, timezone: str) -> TraversalModel:
         return RecentLevelTraversal(HarmonicTraversal(timezone=timezone))
     if name == "harmonic_residual_hour":
         return ResidualHourCorrection(HarmonicTraversal(timezone=timezone), timezone)
+    if name == "harmonic_residual_hour_centred":
+        return ResidualHourCorrection(
+            HarmonicTraversal(timezone=timezone), timezone, centred=True
+        )
     raise ValueError(f"Unknown traversal model {name!r}.")
