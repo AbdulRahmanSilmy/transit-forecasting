@@ -6,6 +6,7 @@ from forecasting.traversal_models import (
     HarmonicTraversal,
     PooledHarmonicTraversal,
     RecentLevelTraversal,
+    ResidualHourCorrection,
     SegmentMedianTraversal,
     ShuffledTargetTraversal,
     make_traversal_model,
@@ -145,3 +146,44 @@ def test_recent_level_model_is_registered():
     model = make_traversal_model("harmonic_recent_level", TIMEZONE)
     assert isinstance(model, RecentLevelTraversal)
     assert isinstance(model.base, HarmonicTraversal)
+
+
+def test_residual_hour_correction_fixes_cell_bias_in_both_directions():
+    # The segment median misses A's slow 8 am and fast 17 h cells.
+    links = _links({"A": (5.0, 1), "B": (5.0, 1)}, peaks={"A": {8: 1.4, 17: 0.8}})
+    original = links.copy()
+    model = ResidualHourCorrection(SegmentMedianTraversal(), TIMEZONE).fit(links)
+    pd.testing.assert_frame_equal(links, original)
+    prediction = model.predict(_requests("A", [8, 17, 12]))
+    n = 28  # one link per day per cell
+    segment_mean = (300 * 0.4 - 300 * 0.2) / 17  # A's mean residual over 17 hours
+    shrunk = lambda cell: (n * cell + 30 * segment_mean) / (n + 30)  # noqa: E731
+    assert prediction[0] == pytest.approx(300 + shrunk(120))
+    assert prediction[1] == pytest.approx(300 + shrunk(-60))  # moves down
+    assert prediction[2] == pytest.approx(300 + shrunk(0))
+    # B has no bias, so no correction.
+    assert model.predict(_requests("B", [8]))[0] == pytest.approx(300)
+
+
+def test_residual_hour_correction_falls_back_for_unseen_cells_and_segments():
+    links = _links({"A": (5.0, 1)}, peaks={"A": {8: 1.4}})
+    model = ResidualHourCorrection(SegmentMedianTraversal(), TIMEZONE).fit(links)
+    unseen_hour = model.predict(_requests("A", [3]))[0]
+    assert unseen_hour == pytest.approx(300 + model.segment_means_["A"])
+    base = SegmentMedianTraversal().fit(links)
+    unseen_segment = pd.DataFrame(
+        {
+            "segment_key": ["Z"],
+            "scheduled_departure": _requests("A", [8])["scheduled_departure"],
+        }
+    )
+    np.testing.assert_array_equal(
+        model.predict(unseen_segment), base.predict(unseen_segment)
+    )
+
+
+def test_residual_hour_model_is_registered():
+    model = make_traversal_model("harmonic_residual_hour", TIMEZONE)
+    assert isinstance(model, ResidualHourCorrection)
+    assert isinstance(model.base, HarmonicTraversal)
+    assert model.shrinkage == 30
