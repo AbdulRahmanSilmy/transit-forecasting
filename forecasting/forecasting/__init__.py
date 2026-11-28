@@ -17,6 +17,7 @@ from .delay_forecast_eval import (
     StudyConfig,
     StudyRun,
     chain_delay_forecast,
+    chain_with_dwell_model,
     prepare_origin_visits,
     run_study,
     score_predictions,
@@ -34,6 +35,7 @@ from .delay_propagation_display import (
     make_propagation_heatmap,
     make_time_space_diagram,
 )
+from .dwell_models import StopHoldDwell, StopMedianDwell, make_dwell_model
 from .feed_clock import journey_timetable_offsets, timetable_offset_summary
 from .harmonic_regression import (
     CalendarHarmonics,
@@ -130,6 +132,10 @@ __all__ = [
     "StudyConfig",
     "StudyRun",
     "chain_delay_forecast",
+    "chain_with_dwell_model",
+    "StopHoldDwell",
+    "StopMedianDwell",
+    "make_dwell_model",
     "prepare_origin_visits",
     "run_study",
     "score_predictions",

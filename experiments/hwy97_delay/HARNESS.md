@@ -7,7 +7,7 @@ The harness is the loop's verifier. Once the owner has approved it, it is **prot
 - `experiments/hwy97_delay/config.json`: dataset window, fold dates, locked-test dates, holidays, stale-report threshold
 - `forecasting/forecasting/delay_forecast_display.py`: standard run figures
 
-Candidate models live in `forecasting/forecasting/traversal_models.py`, and agents change them freely (register new names in `make_traversal_model`). Candidate **anchor** models (first-stop departure delay) live in `forecasting/forecasting/anchor_models.py` (register in `make_anchor_model`).
+Candidate models live in `forecasting/forecasting/traversal_models.py`, and agents change them freely (register new names in `make_traversal_model`). Candidate **anchor** models (first-stop departure delay) live in `forecasting/forecasting/anchor_models.py` (register in `make_anchor_model`). Candidate **dwell** models live in `forecasting/forecasting/dwell_models.py` (register in `make_dwell_model`; added for H7, owner request 2026-11-27).
 
 ## CLI
 
@@ -19,6 +19,8 @@ conda run -n transit_env python experiments/hwy97_delay/evaluate.py --model harm
 Without the approval flag, `--split test` refuses to run. Pass `--hypothesis H1 --log-id E002` to tag the run and pre-fill its LOG row.
 
 `--anchor` (default `feed`, Transit BC's earliest first-stop estimate) swaps the chain anchor $d_0$ of **B2, B3 and the candidate** for an anchor model trained per fold on observed first-stop departure delays: fresh final reports only (same stale rule as truth), published before the cutoff, from journeys disjoint from the block. The model sees only origin-time fields (first `stop_id`, its `calendar_departure`). **B0 and B1 always keep the feed anchor.** Predictions gain an `anchor_model_s` column, and the anchor is recorded as an MLflow param and tag (added for H6, owner-approved). **Study runs use the default `feed`**: the owner put first-stop departure delay out of scope on 2026-11-21 (see RESEARCH.md Scope), so a learned anchor is for later real-time work, not for this study's scored runs.
+
+`--dwell` (default `stop_median`, the per-stop training median, which reproduces E017 exactly) sets the dwell model of **B2, B3, the candidate and the control**. It is fitted once per fold on the same training links as the traversal models. **B0 and B1 never use it.** A dwell model that sets `uses_arrival_delay` (e.g. `stop_hold`, a per-stop hold floor learned from training links) receives the chain's own predicted arrival delay at each stop, so the harness chains stop by stop (`chain_with_dwell_model`) instead of with one cumulative sum. For such a model, the anchor-free score re-chains each method from the actual first-stop departure (`anchor_free_pred_<method>` columns), because a shift is no longer exact. The dwell model is recorded as an MLflow param and tag and in the LOG row.
 
 ## Run tracking (MLflow)
 
@@ -61,7 +63,18 @@ class TraversalModel(Protocol):
         """Traversal seconds for (segment key, scheduled upstream clock) requests known at t0."""
 ```
 
-The harness, not the model, applies the dwell rule, the anchor and the identity chaining. A model only sees what is available at `t0`.
+The harness, not the model, applies the anchor and the identity chaining. A traversal model only sees what is available at `t0`.
+
+```python
+class DwellModel(Protocol):
+    uses_arrival_delay: bool
+    def fit(self, links: pd.DataFrame) -> "DwellModel":
+        """Training links: from_stop_id, upstream_dwell_seconds, upstream_arrival_delay_seconds, scheduled_dwell_seconds, ..."""
+    def predict(self, requests: pd.DataFrame, arrival_delay_seconds: np.ndarray | None = None) -> np.ndarray:
+        """Dwell seconds at each request's upstream stop (from_stop_id, scheduled_departure, scheduled_dwell_seconds, upstream_is_first_stop), given the chain's predicted arrival delay there."""
+```
+
+Dwell at a journey's first stop is always 0 (the anchor is the departure).
 
 ## Pipeline
 

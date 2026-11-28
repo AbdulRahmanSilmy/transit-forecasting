@@ -386,6 +386,30 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
 - Verdict: **keep.** On anchor-free MAE, which decides propagation hypotheses, the candidate beats harmonic by −3.2 s [−4.5, −1.7] in all 6 folds and B3 by −6.1 s [−10.0, −2.6]. The scored gain over harmonic is small but clear of 0; against B3 the scored CI still spans 0. New best candidate: `harmonic_residual_hour_centred` (131.1 s scored, 112.3 s anchor-free). It is route-agnostic: everything is learned from each segment's training residuals, with no route constants.
 - Next: (1) **H10**: give the base model a sharper daily shape so it captures the 16–17 h peak itself rather than through a correction. (2) Recheck the evening loss once H7 (timepoint holding, #15) removes the chain's early drift. (3) E015's segment-level term could be tested on its own if the owner approves a control fix (option (b) on #25).
 
+### E018: recovery-aware dwell, per-stop hold floor (H7, #15)
+
+- Hypothesis: H7. Buses that are early at a timepoint wait for the scheduled departure, so delay recovers towards the timetable there. A chain whose dwell responds to its own predicted arrival delay (hold to the schedule where a stop holds) beats the plain sum with a constant per-stop median dwell.
+- Harness change (owner request, 2026-11-27: "create a new module just like traversal_models.py called dwell_models.py"): dwell is now a pluggable model in `forecasting/forecasting/dwell_models.py` (`make_dwell_model`), chosen with `--dwell` for B2, B3, the candidate and the control (B0 and B1 never use it). The default `stop_median` is the old rule and reproduces E017's predictions exactly (max difference 0.0 s for every method, checked before this run). A model that sets `uses_arrival_delay` gets the chain's predicted arrival delay at each stop, so the harness chains stop by stop (`chain_with_dwell_model`). The anchor-free score then re-chains from the actual first-stop departure, since a shift is no longer exact. Prepared links gain `scheduled_dwell_seconds` and `upstream_arrival_delay_seconds` (NaN for a stale arrival report).
+- Exploration: [28590f2b49dd46fe86afad265a28d2ad](http://127.0.0.1:5000/#/experiments/1/runs/28590f2b49dd46fe86afad265a28d2ad) (5 figures, 1 corrected v2; E017's dev artifacts).
+
+  1. **Four stops hold, sharply.** Departure delay is floored at exactly 0 s at stops 3, 6, 10 and 12. At the other eight stops early buses leave early. Stop 6 (60 s scheduled dwell) also takes back up to about 1 min from late buses.
+
+     ![Departure vs arrival delay by stop](figures/E018/01_dep_vs_arr_delay_by_stop.png)
+
+  2. **The chain often predicts early arrivals there.** Early (< 0) at stops 3 / 6 / 10 / 12: actual 19 / 46 / 22 / 14%; E017 scored 13 / 52 / 37 / 24%; anchor-free 6 / 34 / 27 / 17%. Downstream the scored chain drifts early, so the floor would act on many forecasts.
+  3. **A per-stop hinge `departure = max(arrival + c, h)` fixes the holding stops.** Given the actual arrival (one step, fit dev1, scored dev2–dev6), departure-delay MAE: stop 6 52.0 → 26.5 s (bias −29 → −3), stop 10 29.3 → 21.2, stop 3 12.8 → 9.7, stop 12 14.9 → 13.9. Fit on one fold, it also learns false floors at stops 4, 5 and 8 (−120 to −60 s), costing 0.5–2 s, so the design keeps floors near the schedule only.
+
+     ![One-step departure-delay MAE, median rule vs hinge](figures/E018/04_one_step_departure_mae_median_vs_hinge.png)
+
+  4. **What is left is hour-structured in a few cells only.** Late buses at stop 6 recover 50–75 s more at 14–16 h, and stop 10 dwells 30 s less at 7–13 h. Elsewhere the median residual is 0. That is a separate refinement (proposed H11), left out so this run measures holding alone.
+
+- Design (fixed before scoring): `StopHoldDwell`, registered as `stop_hold`. Per upstream stop, an L1 grid fit of `departure_delay = max(arrival_delay + c, h)` on the fold's training links (fresh upstream arrival, dwell ≥ 0, not the first stop), with c ∈ [−120, 180] s (step 1) and h ∈ [−60, 60] s (step 5). The floor is kept only if it lowers in-sample MAE by ≥ 2% over the no-hold median, otherwise h = −inf and c = median(dwell − scheduled dwell), which is the old rule. Fewer than 50 links: pooled median, no hold. Predicted dwell = max(c, h − predicted arrival delay) + scheduled dwell, clipped at 0. Traversal model: E017's `harmonic_residual_hour_centred`, unchanged. Single run, no tuning. Training-side check before scoring: dev1 and dev6 training both learn h = 0 s at stops 3, 6, 10 and 12, and h = −inf everywhere else.
+- Prediction before running (reference E017: candidate 131.1 s scored, bias −72.4; 112.3 s anchor-free, bias −17.4; B3 134.2 / 118.4):
+  - Holds only ever move a forecast later, and the scored chain runs about 70 s early, so **scored delay MAE improves for every chained method**: candidate 123–129 s (−2 to −8 s), bias −45 to −60 s. The gain starts at stop 7 and grows downstream; stops 2–6 change by < 1 s.
+  - **Anchor-free** improves less: candidate 108–111 s (−1 to −4 s), bias −17 → between −8 and +5 s.
+  - B3 gains about as much (scored 126–132 s), so **candidate vs B3 stays about where E017 left it** (scored −2 to −4 s; anchor-free −5 to −7 s).
+  - Shuffled control passes (control and B2 share the dwell model). Traversal scores are unchanged (dwell does not touch traversal).
+
 <!-- Template for new entries:
 
 ### E0NN: <short title>
