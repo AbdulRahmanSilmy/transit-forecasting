@@ -28,6 +28,8 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
 | E015 | 2026-11-22 | [4f80b84](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/4f80b84) | H8 ([#25](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/25)) | dev: harmonic_residual_hour ([7594714fa45d41f1b95959a6347f1550](http://127.0.0.1:5000/#/experiments/1/runs/7594714fa45d41f1b95959a6347f1550)) | not interpreted (shuffled control failed) | n/a | n/a | superseded by E017 (owner chose option (c)) |
 | E016 | 2026-11-27 | [62583ad](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/62583ad) | [#36](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/36) | dev: harmonic_huber, post-midnight journeys recovered ([505097b99658454c9c35757184b6d3d6](http://127.0.0.1:5000/#/experiments/1/runs/505097b99658454c9c35757184b6d3d6)) | 132.9 (B0 162.8; anchor-free 115.5) | -30.0 [-36.7, -23.6] (-18.4%) | -1.3 vs B3_calendar_median | keep; +1,550 overnight visits, new reference baseline |
 | E017 | 2026-11-28 | [e1063a3](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/e1063a3) | H8 ([#25](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/25)) | dev: harmonic_residual_hour_centred ([400457c929b64472a6dbc272b635d599](http://127.0.0.1:5000/#/experiments/1/runs/400457c929b64472a6dbc272b635d599)) | 131.1 (B0 162.8; anchor-free 112.3) | -31.7 [-38.3, -25.4] (-19.5%) | -3.1 vs B3_calendar_median | keep; vs harmonic −1.7 [−2.9, −0.4] scored, −3.2 [−4.5, −1.7] anchor-free |
+| E018 | 2026-11-28 | [275ddcc](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/275ddcc) | H10 ([#43](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/43)) | dev: harmonic_daily12 ([0ef31a40c53843df8f937b82d21f1604](http://127.0.0.1:5000/#/experiments/1/runs/0ef31a40c53843df8f937b82d21f1604)) | 131.8 (B0 162.8; anchor-free 114.4) | -31.0 [-37.6, -24.8] (-19.1%) | -2.4 vs B3_calendar_median | discard; vs E017 +0.7 [−0.6, +1.9] scored, +2.1 [+0.7, +3.4] anchor-free |
+| E019 | 2026-11-28 | [275ddcc](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/275ddcc) | H10 ([#43](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/43)) | dev: harmonic_hour_effect ([02b0b5992a18431c804872ae5c96b74f](http://127.0.0.1:5000/#/experiments/1/runs/02b0b5992a18431c804872ae5c96b74f)) | 130.4 (B0 162.8; anchor-free 113.1) | -32.4 [-38.9, -26.1] (-19.9%) | -3.8 vs B3_calendar_median | discard vs E017 (anchor-free +0.8 [+0.05, +1.5]); scored −0.7 [−1.3, −0.1], evening loss mostly gone |
 
 ## Entries
 
@@ -385,6 +387,79 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
   - Unlike E015, the gain is not a level shift (traversal and delay bias unchanged). It is the hour shape that harmonic's smooth daily curve misses, mainly the sharp 16–17 h peak and the overnight trips. Per link the correction does nothing (traversal MAE +0.2 s). It only pays off because same-hour corrections add up along the route, as exploration plot 2 suggested.
 - Verdict: **keep.** On anchor-free MAE, which decides propagation hypotheses, the candidate beats harmonic by −3.2 s [−4.5, −1.7] in all 6 folds and B3 by −6.1 s [−10.0, −2.6]. The scored gain over harmonic is small but clear of 0; against B3 the scored CI still spans 0. New best candidate: `harmonic_residual_hour_centred` (131.1 s scored, 112.3 s anchor-free). It is route-agnostic: everything is learned from each segment's training residuals, with no route constants.
 - Next: (1) **H10**: give the base model a sharper daily shape so it captures the 16–17 h peak itself rather than through a correction. (2) Recheck the evening loss once H7 (timepoint holding, #15) removes the chain's early drift. (3) E015's segment-level term could be tested on its own if the owner approves a control fix (option (b) on #25).
+
+### E018: harmonic with daily order 12 (H10 candidate 1, #43)
+
+- Hypothesis: H10. Harmonic's smooth daily curve (order 6, shortest wave 4 h) misses the sharp 16–17 h peak. With daily order 12 (shortest wave 2 h) and the same L1 penalty, the base model follows the peak itself and beats E017 on anchor-free delay MAE (112.3 s), with a paired CI vs E017 entirely below 0.
+- Exploration: [e4cfa5a47ef649f48051bb09486e2244](http://127.0.0.1:5000/#/experiments/1/runs/e4cfa5a47ef649f48051bb09486e2244) (shared with E019; 8 figures: in-sample fits on the 6 dev folds' training links, then one plot of the scored results).
+  1. **Order 12 doesn't follow the peak, even in sample.** Route-summed training residual at 16:30 falls only from +307 s (order 6) to +260 s; at 15:00–15:30 order 12 is worse.
+  2. **The peak gap is half shape, half skew.** At 16:00–16:30 the route-summed *median* residual is +148/+158 s (order 6) and the mean is about 100–150 s higher. Away from the peak the median residual is about 0 and the mean sits +40 to +60 s above it: right skew that the log-space Huber fit doesn't target. Order 12 recovers only about 40 s of the median gap and none of the skew.
+
+     ![Mean vs median training residual by half-hour](figures/E018/03_mean_vs_median_residual_v2.png)
+
+  3. **The peak is a weekday effect about 1 h wide** (weekday median residual +199/+219 s at 16:00/16:30, −82 s at 17:30), narrower than order 12's shortest wave.
+- Design (fixed before scoring, as pre-registered on #43): `HarmonicTraversal(daily_order=12)`, registered as `harmonic_daily12`. Same weekly order (3), interactions, Huber delta and L1 penalty (`alpha = 0.003`). Single run, no tuning.
+- Prediction before running (reference E016 harmonic: 132.9 s scored, 115.5 s anchor-free, traversal MAE 33.0 s, bias −1.2; E017: 131.1 s, 112.3 s):
+  - Shuffled control passes (about 255 s).
+  - Traversal MAE 32.8–33.6 s (more terms, more variance); traversal bias within ±1 s of −1.2 s.
+  - Delay MAE about level with harmonic: scored 131.5–134.5 s, anchor-free 114–117 s. **Worse than E017** on both, so the primary criterion fails. Small gain at 16 h, small loss at 15 h.
+- Git: [275ddcc](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/275ddcc) (clean)   MLflow run: [0ef31a40c53843df8f937b82d21f1604](http://127.0.0.1:5000/#/experiments/1/runs/0ef31a40c53843df8f937b82d21f1604)
+- Results (dev, the same 29,292 visits as E016/E017; 39 service days; 0 unscorable for every method):
+  - **Delay MAE:** B0 162.8 s, B2 253.7, B3 134.2, **candidate 131.8** (bias −72.4), shuffled control 255.7. E016 harmonic 132.9, E017 131.1.
+  - **vs B0:** −31.0 s [−37.6, −24.8], −19.1%, win rate 0.63. **vs B3:** −2.4 s [−6.3, +1.0].
+  - **Paired on the same rows** (day bootstrap on saved predictions): vs E017 scored +0.7 s [−0.6, +1.9], **anchor-free +2.1 s [+0.7, +3.4]**; vs harmonic scored −1.1 s [−1.5, −0.6], anchor-free −1.1 s [−1.6, −0.5].
+  - **By fold (scored, candidate − E017):** +0.4, −1.1, +1.5, +1.6, +0.2, +1.6 s. Anchor-free worse than E017 in all 6 folds (+1.0 to +4.1 s), better than harmonic in all 6 (−0.5 to −1.6 s).
+  - **By hour (scored, vs harmonic):** 16 h −9.0 s and 17 h −3.6 (E017 −25.7, −19.3); 08 h −10.9; 15 h +5.9; 21 h +6.7. Anchor-free it misses E017's overnight gain (01 h −3.5 vs −30.2 s).
+  - **Anchor-free:** 114.4 s (bias −17.5); vs B3 −4.0 s [−8.1, −0.5].
+  - **Traversal:** MAE 32.9 s (bias −1.1) vs harmonic 33.0 (−1.2), B3 34.7. Control 43.3 s (bias −6.2) vs B2 42.7 (−6.4).
+- Sanity checks: leakage assertions passed; identical rows across methods (0 unscorable); shuffled control passed (255.7 s vs B2 253.7, threshold 251.2).
+- Interpretation: **prediction held.** Traversal MAE 32.9 s (32.8–33.6), bias −1.1 (within ±1 of −1.2), scored 131.8 (131.5–134.5), anchor-free 114.4 (114–117), worse than E017 on both, a small gain at 16 h and a loss at 15 h. As the exploration showed in sample, a 2 h shortest wave can't represent a peak about 1 h wide, and order 12 recovers little of the gap that E017's correction closes.
+- Verdict: **discard.** It fails H10's primary criterion (anchor-free vs E017 is worse, CI above 0). It is a small, consistent improvement on harmonic (−1.1 s), but E017 dominates it.
+- Next: candidate 2 (E019).
+
+### E019: harmonic times a penalised per-segment × hour effect (H10 candidate 2, #43)
+
+- Hypothesis: H10 candidate 2, run because E018's exploration showed order 12 can't follow the peak. A per-segment hour-of-day effect on harmonic's log residuals, fitted in the base model's own loss (Huber, delta 0.15) with a ridge penalty towards the harmonic curve, captures the 16–17 h peak without E017's noisy per-cell means, and beats E017 on anchor-free delay MAE with a paired CI entirely below 0.
+- Exploration: [e4cfa5a47ef649f48051bb09486e2244](http://127.0.0.1:5000/#/experiments/1/runs/e4cfa5a47ef649f48051bb09486e2244) (shared with E018). Design check, in sample on the 6 folds' training links:
+  - The hour effect halves the 16:00/16:30 median gap (+148/+158 s → +62/+76 s; E017 −18/−8 s). Mean absolute route-summed median residual over half-hours: 28.6 s, the same as E017 (order 6 45.2 s, order 12 35.8 s).
+  - It leaves the skew: the route-summed **mean** residual at 16:30 is +223 s, against E017 +141 s and order 6 +307 s.
+  - **Evening (18–21 h):** E017's mean residual sits +20 to +40 s above every other fit. Centring subtracts a segment mean inflated by the skewed peak cells, which pushes the other hours down. This is the likely cause of E017's evening loss. The hour effect stays at harmonic's level there.
+
+  ![In-sample design check: mean and median residual by half-hour](figures/E018/06_design_check_hour_effect_v2.png)
+
+- Design (fixed before scoring): `HourEffectTraversal(HarmonicTraversal())`, registered as `harmonic_hour_effect`. Each segment × local-hour cell gets an effect `e` on the log residuals that minimises `sum(huber_0.15(r − e)) + (30 / 2) e²` (IRLS). The prediction is harmonic × exp(e); unseen cells use harmonic. The penalty of 30 pseudo-links and delta 0.15 are taken from E017 and the base model; nothing was tuned on dev scores.
+- Prediction before running:
+  - Shuffled control passes (about 255 s). Without a calendar signal, the effects shrink to about 0.
+  - Traversal MAE 32.8–33.2 s (at or slightly below harmonic, since it targets the typical trip); traversal bias −1.0 to −1.6 s.
+  - At 16–17 h it gains about half of E017's gain over harmonic. At 18–21 h it loses less than E017 (close to harmonic).
+  - Overall about level with E017: scored 130.5–133.0 s, anchor-free 112–115 s. A CI vs E017 entirely below 0 is **unlikely**; the most likely verdict against the primary criterion is inconclusive or discard. If so, the residual gap is the skew, which needs a mean target (H8) rather than a sharper shape.
+- Git: [275ddcc](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/275ddcc) (clean)   MLflow run: [02b0b5992a18431c804872ae5c96b74f](http://127.0.0.1:5000/#/experiments/1/runs/02b0b5992a18431c804872ae5c96b74f)
+- Results (dev, the same 29,292 visits; 39 service days; 0 unscorable for every method):
+  - **Delay MAE:** B0 162.8 s, B2 253.7, B3 134.2, **candidate 130.4** (bias −70.5), shuffled control 255.4. E016 harmonic 132.9, E017 131.1.
+  - **vs B0:** −32.4 s [−38.9, −26.1], −19.9%, win rate 0.64. **vs B3:** −3.8 s [−7.5, −0.4], the first scored CI vs B3 entirely below 0 (E017: −3.1 [−6.8, +0.2]).
+  - **Paired on the same rows:** vs E017 **scored −0.7 s [−1.3, −0.1]**, **anchor-free +0.8 s [+0.05, +1.5]**; vs harmonic scored −2.4 s [−3.1, −1.7], anchor-free −2.4 s [−3.0, −1.6].
+  - **By fold (candidate − E017):** scored −0.9, −1.4, −0.3, −0.2, −1.5, +0.1 s; anchor-free −0.5, +0.2, +1.1, +1.1, +0.4, +2.4 s. Better than harmonic in all 6 folds on both scores.
+  - **By hour, vs harmonic (scored):** 16 h −17.1 s and 17 h −7.5 (E017 −25.7, −19.3); 18–21 h +1.0, +2.6, −1.2, +3.2 (E017 +4.9, +10.6, +10.2, +17.9); 01–02 h −9.5, −9.0 (E017 −13.6, −20.1). **Anchor-free:** 16–17 h −11.1, −6.2 (E017 −12.8, −10.6); 01–02 h −15.9, −11.1 (E017 −30.2, −24.7); 23 h −7.6 (E017 −14.0); 18–21 h within ±1 (E017 +2 to +5).
+  - **By stop (vs E017):** scored −0.2 to −2.5 s at stops 2–12, +0.4/+0.5 at 13–14; anchor-free +1.3 to +3.4 s at stops 10–14.
+  - **Anchor-free:** 113.1 s (bias −15.5); vs B3 −5.3 s [−9.1, −1.8] (E017 −6.1 [−10.0, −2.6]).
+  - **Traversal:** MAE 32.9 s (bias −0.8) vs harmonic 33.0 (−1.2), E017 33.2 (−1.0), B3 34.7. Control 43.1 s (bias −6.3) vs B2 42.7 (−6.4).
+
+  ![Δ delay MAE vs harmonic by hour, E017–E019](figures/E018/08_result_delta_vs_harmonic_by_hour_v2.png)
+
+- Sanity checks: leakage assertions passed; identical rows across methods (0 unscorable); shuffled control passed (255.4 s vs B2 253.7, threshold 251.2).
+- Interpretation: **prediction mostly held.**
+  - Held: the control passes; traversal MAE 32.9 s (32.8–33.2); anchor-free 113.1 (112–115); it gains about half of E017's peak gain over harmonic (scored 16 h 67%, 17 h 39%) and the evening loss nearly disappears; no CI vs E017 entirely below 0 on the deciding score.
+  - Not quite: traversal bias −0.8 s (predicted −1.0 to −1.6; still within ±1 of harmonic's −1.2), and scored 130.4 s is just below the predicted 130.5–133.0, with a scored CI vs E017 entirely below 0.
+  - **The two scores disagree.** On the scored metric, E019 wins because it no longer pushes evening forecasts earlier on a chain that already runs about 70 s early (E017's evening loss was mostly the anchor). Anchor-free, E017 still wins, mainly overnight (00–02 h and 23 h) and at the 16–17 h peak. Those are the hours where the mean sits well above the typical trip (exploration plot 3). A log-space Huber effect follows the typical trip, so it can't capture that skew, while E017's mean correction can.
+- Verdict against H10's pre-registered success criteria:
+  - **Primary: fail.** Anchor-free +0.8 s [+0.05, +1.5] vs E017; the CI is not below 0.
+  - Scored no worse than E017: pass (−0.7 [−1.3, −0.1]).
+  - Shuffled control: pass. Traversal bias within ±1 s of harmonic's: pass (−0.8).
+  - 16–17 h gain kept: partly (about half).
+  - 18–21 h loss shrinks: pass.
+
+  **Verdict: discard as a replacement for E017.** Anchor-free MAE decides propagation hypotheses, and E017 stays the best candidate (112.3 s). **H10 is not supported:** a sharper typical-trip shape is not enough. The part of E017's gain that E019 misses is the skew. E019 is the best candidate on the scored metric so far (130.4 s; the only one with a scored CI vs B3 below 0), which is worth recording for the owner's choice of final candidate.
+- Next: combine the two. E019 fixes the typical-trip shape without distorting the evening; E017's mean correction captures the skew but its centring on a skew-inflated segment mean pushes the other hours down. Proposed **H11**: E017's centred mean correction applied on top of E019 (`ResidualHourCorrection(HourEffectTraversal(harmonic), centred=True)`). The residual hour shape is then mostly skew, and the segment mean it is centred on is less inflated by the peak. No harness change needed.
 
 <!-- Template for new entries:
 

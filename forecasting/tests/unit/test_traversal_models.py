@@ -4,6 +4,7 @@ import pytest
 
 from forecasting.traversal_models import (
     HarmonicTraversal,
+    HourEffectTraversal,
     PooledHarmonicTraversal,
     RecentLevelTraversal,
     ResidualHourCorrection,
@@ -235,3 +236,60 @@ def test_centred_residual_hour_model_is_registered():
     assert isinstance(model.base, HarmonicTraversal)
     assert model.centred and model.shrinkage == 30
     assert not make_traversal_model("harmonic_residual_hour", TIMEZONE).centred
+
+
+def test_hour_effect_is_the_ridge_mean_of_small_log_residuals():
+    # A runs 10% slow at 8 am; log(1.1) is inside the Huber transition (0.15).
+    links = _links({"A": (5.0, 1)}, peaks={"A": {8: 1.1}})
+    original = links.copy()
+    model = HourEffectTraversal(SegmentMedianTraversal(), TIMEZONE).fit(links)
+    pd.testing.assert_frame_equal(links, original)
+    n = 28  # one link per day per cell
+    effect = n * np.log(1.1) / (n + 30)
+    prediction = model.predict(_requests("A", [8, 12]))
+    np.testing.assert_allclose(prediction, [300 * np.exp(effect), 300.0])
+
+
+def test_hour_effect_is_robust_to_a_few_slow_links():
+    links = _links({"A": (5.0, 1)})
+    hours = links["scheduled_departure"].dt.tz_convert(TIMEZONE).dt.hour
+    slow = links.index[hours.eq(12)][:3]
+    links.loc[slow, "traversal_seconds"] *= 3.0  # three incidents at noon
+    model = HourEffectTraversal(SegmentMedianTraversal(), TIMEZONE).fit(links)
+    effect = model.effects_[("A", 12)]
+    ridge_mean = 3 * np.log(3.0) / (28 + 30)
+    assert 0 < effect < ridge_mean / 2
+    # Stationarity of sum(huber(r - e)) + k/2 e^2: sum(psi(r - e)) = k e.
+    r = np.where(np.isin(np.arange(28), [0, 1, 2]), np.log(3.0), 0.0)
+    psi = np.clip(r - effect, -0.15, 0.15)
+    assert psi.sum() == pytest.approx(30 * effect, abs=1e-6)
+
+
+def test_hour_effect_leaves_unseen_cells_and_segments_at_the_base():
+    links = _links({"A": (5.0, 1)}, peaks={"A": {8: 1.4}})
+    model = HourEffectTraversal(SegmentMedianTraversal(), TIMEZONE).fit(links)
+    base = SegmentMedianTraversal().fit(links)
+    unseen = pd.concat(
+        [
+            _requests("A", [3]),
+            pd.DataFrame(
+                {
+                    "segment_key": ["Z"],
+                    "scheduled_departure": _requests("A", [8])["scheduled_departure"],
+                }
+            ),
+        ],
+        ignore_index=True,
+    )
+    np.testing.assert_array_equal(model.predict(unseen), base.predict(unseen))
+
+
+def test_h10_models_are_registered():
+    daily12 = make_traversal_model("harmonic_daily12", TIMEZONE)
+    assert isinstance(daily12, HarmonicTraversal)
+    assert daily12.daily_order == 12 and daily12.alpha == 0.003
+    effect = make_traversal_model("harmonic_hour_effect", TIMEZONE)
+    assert isinstance(effect, HourEffectTraversal)
+    assert isinstance(effect.base, HarmonicTraversal)
+    assert effect.base.daily_order == 6
+    assert effect.shrinkage == 30 and effect.delta == 0.15
