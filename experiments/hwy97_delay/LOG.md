@@ -386,6 +386,39 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
 - Verdict: **keep.** On anchor-free MAE, which decides propagation hypotheses, the candidate beats harmonic by −3.2 s [−4.5, −1.7] in all 6 folds and B3 by −6.1 s [−10.0, −2.6]. The scored gain over harmonic is small but clear of 0; against B3 the scored CI still spans 0. New best candidate: `harmonic_residual_hour_centred` (131.1 s scored, 112.3 s anchor-free). It is route-agnostic: everything is learned from each segment's training residuals, with no route constants.
 - Next: (1) **H10**: give the base model a sharper daily shape so it captures the 16–17 h peak itself rather than through a correction. (2) Recheck the evening loss once H7 (timepoint holding, #15) removes the chain's early drift. (3) E015's segment-level term could be tested on its own if the owner approves a control fix (option (b) on #25).
 
+### E018: harmonic with daily order 12 (H10 candidate 1, #43)
+
+- Hypothesis: H10. Harmonic's smooth daily curve (order 6, shortest wave 4 h) misses the sharp 16–17 h peak. With daily order 12 (shortest wave 2 h) and the same L1 penalty, the base model follows the peak itself and beats E017 on anchor-free delay MAE (112.3 s), with a paired CI vs E017 entirely below 0.
+- Exploration: [e4cfa5a47ef649f48051bb09486e2244](http://127.0.0.1:5000/#/experiments/1/runs/e4cfa5a47ef649f48051bb09486e2244) (shared with E019; training links of the 6 dev folds only, in-sample fits).
+  1. **Order 12 doesn't follow the peak, even in sample.** Route-summed training residual at 16:30 falls only from +307 s (order 6) to +260 s; at 15:00–15:30 order 12 is worse.
+  2. **The peak gap is half shape, half skew.** At 16:00–16:30 the route-summed *median* residual is +148/+158 s (order 6) and the mean is about 100–150 s higher. Away from the peak the median residual is about 0 and the mean sits +40 to +60 s above it: right skew that the log-space Huber fit doesn't target. Order 12 recovers only about 40 s of the median gap and none of the skew.
+
+     ![Mean vs median training residual by half-hour](figures/E018/03_mean_vs_median_residual_v2.png)
+
+  3. **The peak is a weekday effect about 1 h wide** (weekday median residual +199/+219 s at 16:00/16:30, −82 s at 17:30), narrower than order 12's shortest wave.
+- Design (fixed before scoring, as pre-registered on #43): `HarmonicTraversal(daily_order=12)`, registered as `harmonic_daily12`. Same weekly order (3), interactions, Huber delta and L1 penalty (`alpha = 0.003`). Single run, no tuning.
+- Prediction before running (reference E016 harmonic: 132.9 s scored, 115.5 s anchor-free, traversal MAE 33.0 s, bias −1.2; E017: 131.1 s, 112.3 s):
+  - Shuffled control passes (about 255 s).
+  - Traversal MAE 32.8–33.6 s (more terms, more variance); traversal bias within ±1 s of −1.2 s.
+  - Delay MAE about level with harmonic: scored 131.5–134.5 s, anchor-free 114–117 s. **Worse than E017** on both, so the primary criterion fails. Small gain at 16 h, small loss at 15 h.
+
+### E019: harmonic times a penalised per-segment × hour effect (H10 candidate 2, #43)
+
+- Hypothesis: H10 candidate 2, run because E018's exploration showed order 12 can't follow the peak. A per-segment hour-of-day effect on harmonic's log residuals, fitted in the base model's own loss (Huber, delta 0.15) with a ridge penalty towards the harmonic curve, captures the 16–17 h peak without E017's noisy per-cell means, and beats E017 on anchor-free delay MAE with a paired CI entirely below 0.
+- Exploration: [e4cfa5a47ef649f48051bb09486e2244](http://127.0.0.1:5000/#/experiments/1/runs/e4cfa5a47ef649f48051bb09486e2244) (shared with E018). Design check, in sample on the 6 folds' training links:
+  - The hour effect halves the 16:00/16:30 median gap (+148/+158 s → +62/+76 s; E017 −18/−8 s). Mean absolute route-summed median residual over half-hours: 28.6 s, the same as E017 (order 6 45.2 s, order 12 35.8 s).
+  - It leaves the skew: the route-summed **mean** residual at 16:30 is +223 s, against E017 +141 s and order 6 +307 s.
+  - **Evening (18–21 h):** E017's mean residual sits +20 to +40 s above every other fit. Centring subtracts a segment mean inflated by the skewed peak cells, which pushes the other hours down. This is the likely cause of E017's evening loss. The hour effect stays at harmonic's level there.
+
+  ![In-sample design check: mean and median residual by half-hour](figures/E018/06_design_check_hour_effect_v2.png)
+
+- Design (fixed before scoring): `HourEffectTraversal(HarmonicTraversal())`, registered as `harmonic_hour_effect`. Each segment × local-hour cell gets an effect `e` on the log residuals that minimises `sum(huber_0.15(r − e)) + (30 / 2) e²` (IRLS). The prediction is harmonic × exp(e); unseen cells use harmonic. The penalty of 30 pseudo-links and delta 0.15 are taken from E017 and the base model; nothing was tuned on dev scores.
+- Prediction before running:
+  - Shuffled control passes (about 255 s). Without a calendar signal, the effects shrink to about 0.
+  - Traversal MAE 32.8–33.2 s (at or slightly below harmonic, since it targets the typical trip); traversal bias −1.0 to −1.6 s.
+  - At 16–17 h it gains about half of E017's gain over harmonic. At 18–21 h it loses less than E017 (close to harmonic).
+  - Overall about level with E017: scored 130.5–133.0 s, anchor-free 112–115 s. A CI vs E017 entirely below 0 is **unlikely**; the most likely verdict against the primary criterion is inconclusive or discard. If so, the residual gap is the skew, which needs a mean target (H8) rather than a sharper shape.
+
 <!-- Template for new entries:
 
 ### E0NN: <short title>

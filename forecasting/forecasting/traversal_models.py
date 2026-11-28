@@ -558,6 +558,132 @@ class ResidualHourCorrection:
         return np.asarray(self.base.predict(requests), dtype=float) + correction
 
 
+class HourEffectTraversal:
+    """Calendar model times a per-segment x hour effect in log space (H10).
+
+    A sharper daily shape for the base model. The base is fitted first; then,
+    for each segment and local hour of the scheduled upstream departure, an
+    effect ``e`` on the log residuals ``r = log(actual) - log(base)`` minimises
+
+    ``sum(huber_delta(r - e)) + (k / 2) * e**2``,
+
+    the base model's own robust loss plus a ridge penalty that pulls the effect
+    towards 0, i.e. towards the base curve. In the quadratic region this is
+    ``e = sum(r) / (n + k)``, so ``k`` acts as a pseudo-count of links at the
+    base curve. It is solved by iteratively reweighted least squares. Unlike
+    :class:`ResidualHourCorrection` (a mean of residual seconds), the effect
+    follows the cell's typical (log) traversal, like the base fit, and it can
+    represent a peak narrower than the base's shortest harmonic wave.
+
+    Predictions are ``base * exp(e)``; unseen cells and segments get ``e = 0``.
+
+    Parameters
+    ----------
+    base : TraversalModel
+        Unfitted calendar model returning positive seconds.
+    timezone : str, default "America/Vancouver"
+        Calendar timezone for the hour.
+    shrinkage : float, default 30
+        Ridge penalty ``k``, in pseudo-links.
+    delta : float, default 0.15
+        Huber transition in log units (as in :class:`HarmonicTraversal`).
+    max_iter : int, default 100
+        IRLS iterations.
+    tol : float, default 1e-8
+        Stop when no effect changes by more than this (log units).
+    """
+
+    def __init__(
+        self,
+        base: TraversalModel,
+        timezone: str = "America/Vancouver",
+        shrinkage: float = 30.0,
+        delta: float = 0.15,
+        max_iter: int = 100,
+        tol: float = 1e-8,
+    ) -> None:
+        self.base = base
+        self.timezone = timezone
+        self.shrinkage = shrinkage
+        self.delta = delta
+        self.max_iter = max_iter
+        self.tol = tol
+
+    def _hours(self, frame: pd.DataFrame) -> np.ndarray:
+        """Local hour of the scheduled upstream departure."""
+        return _local_clock(
+            frame["scheduled_departure"], self.timezone
+        ).dt.hour.to_numpy()
+
+    def fit(self, links: pd.DataFrame) -> HourEffectTraversal:
+        """Fit the base model and the penalised cell effects.
+
+        Parameters
+        ----------
+        links : pandas.DataFrame
+            Training links with ``segment_key``, ``scheduled_departure`` and
+            positive ``traversal_seconds``. Not modified.
+
+        Returns
+        -------
+        HourEffectTraversal
+            Fitted model.
+        """
+        self.base.fit(links)
+        residual = np.log(links["traversal_seconds"].to_numpy(dtype=float)) - np.log(
+            np.asarray(self.base.predict(links), dtype=float)
+        )
+        frame = pd.DataFrame(
+            {
+                "segment_key": links["segment_key"].to_numpy(),
+                "hour": self._hours(links),
+                "residual": residual,
+            }
+        ).dropna(subset=["residual"])
+        cell = pd.MultiIndex.from_frame(frame[["segment_key", "hour"]])
+        codes, cells = pd.factorize(cell)
+        r = frame["residual"].to_numpy()
+        effect = np.zeros(len(cells))
+        for _ in range(self.max_iter):
+            deviation = np.abs(r - effect[codes])
+            weight = np.minimum(1.0, self.delta / np.maximum(deviation, 1e-12))
+            numerator = np.bincount(codes, weights=weight * r, minlength=len(cells))
+            denominator = np.bincount(codes, weights=weight, minlength=len(cells))
+            updated = numerator / (denominator + self.shrinkage)
+            change = np.max(np.abs(updated - effect), initial=0.0)
+            effect = updated
+            if change < self.tol:
+                break
+        self.effects_ = pd.Series(
+            effect,
+            index=pd.MultiIndex.from_tuples(cells, names=["segment_key", "hour"]),
+        )
+        return self
+
+    def predict(self, requests: pd.DataFrame) -> np.ndarray:
+        """Predict base traversal seconds times ``exp(effect)``.
+
+        Parameters
+        ----------
+        requests : pandas.DataFrame
+            Requests accepted by the base model, with ``segment_key`` and
+            ``scheduled_departure``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Seconds; NaN wherever the base model returns NaN. Unseen cells and
+            segments get the base prediction.
+        """
+        index = pd.MultiIndex.from_arrays(
+            [requests["segment_key"].to_numpy(), self._hours(requests)]
+        )
+        effect = np.nan_to_num(
+            self.effects_.reindex(index).to_numpy(dtype=float), nan=0.0
+        )
+        return np.asarray(self.base.predict(requests), dtype=float) * np.exp(effect)
+
+
 class ShuffledTargetTraversal:
     """Control: fit a model on traversals permuted within each segment.
 
@@ -628,7 +754,11 @@ def make_traversal_model(name: str, timezone: str) -> TraversalModel:
         or ``'harmonic_residual_hour'`` (``harmonic_huber`` plus an additive
         per-segment x hour training-residual mean, shrinkage 30) or
         ``'harmonic_residual_hour_centred'`` (the same with the segment mean
-        removed, so only the within-segment hour shape is added).
+        removed, so only the within-segment hour shape is added) or
+        ``'harmonic_daily12'`` (``harmonic_huber`` with daily order 12, same
+        penalty) or ``'harmonic_hour_effect'`` (``harmonic_huber`` times a
+        per-segment x hour effect on log residuals, Huber loss plus a ridge
+        penalty of 30 pseudo-links).
     timezone : str
         Calendar timezone.
 
@@ -660,4 +790,8 @@ def make_traversal_model(name: str, timezone: str) -> TraversalModel:
         return ResidualHourCorrection(
             HarmonicTraversal(timezone=timezone), timezone, centred=True
         )
+    if name == "harmonic_daily12":
+        return HarmonicTraversal(daily_order=12, timezone=timezone)
+    if name == "harmonic_hour_effect":
+        return HourEffectTraversal(HarmonicTraversal(timezone=timezone), timezone)
     raise ValueError(f"Unknown traversal model {name!r}.")
