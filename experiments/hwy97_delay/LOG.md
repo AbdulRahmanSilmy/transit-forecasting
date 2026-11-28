@@ -422,6 +422,10 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
   - **Anchor-free:** candidate 104.2 s (bias −16.9), B3 109.5 (−3.0), B1 133.6. vs B3 **−5.3 s [−9.0, −2.0]** (E017: −6.1).
   - **Dwell:** model dwell MAE 16.0 s (bias −2.6) along the candidate's chain, vs E017's median rule 15.4 s (bias −3.7). Per link, dwell is slightly worse: it now depends on the chain's predicted arrival, not the actual one. The gain is in the delay that carries downstream. Traversal scores are identical to E017 (candidate 33.2 s).
 
+  - **Ticket #15's success check (stops 10–14 below B0, earlier stops unharmed): met.** Candidate / B0 at stops 10–14: 138.7 / 175.1, 155.3 / 242.4, 165.0 / 234.2, 168.4 / 203.0, **175.6 / 186.1** (E017 lost to B0 at stop 14: 192.8). Stops 2–6 unchanged.
+  - **Dwell bias by stop (E017 → E018):** stop 6 −27.3 → −13.9 s, stop 10 −20.5 → −17.1, stop 12 +7.4 → +3.9, stop 3 +4.0 unchanged; others identical. Per-link dwell MAE gets worse at stop 6 (50.3 → 56.8 s): the dwell now offsets the chain's own arrival error, which helps the delay carried downstream but not the dwell scored alone.
+  - **Learned holds:** h = 0 s at stops 3, 6, 10 and 12 in every fold, h = −inf elsewhere. These are exactly the GTFS timepoints between the anchor and the terminus (#15), found without the timepoint flag.
+
   ![Δ delay MAE vs E017 by stop](figures/E018/06_result_delta_vs_e017_by_stop.png)
 
 - Sanity checks: leakage assertions passed; identical rows across methods (0 unscorable); **shuffled control passed** (191.0 s vs B2 188.8, threshold 186.9). Before the run, `--dwell stop_median` reproduced E017's predictions exactly.
