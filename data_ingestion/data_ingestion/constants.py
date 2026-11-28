@@ -51,7 +51,10 @@ READ_TIMESTAMP_KEY = "read_timestamp"
 INDEX_FEED_TIMESTAMP_NAME = "idx_feed_timestamp"
 
 # Shared ingestion transform settings
-TRIP_START_TIMESTAMP_FORMAT = "%Y%m%d %H:%M:%S"
+TRIP_START_DATE_FORMAT = "%Y%m%d"
+# GTFS start_time is HH:MM:SS and may reach 24:00:00 or later for trips that
+# run past midnight on the previous service day.
+TRIP_START_TIME_PATTERN = r"\d{1,2}:\d{2}:\d{2}"
 UNIX_TIMESTAMP_UNIT = "s"
 
 

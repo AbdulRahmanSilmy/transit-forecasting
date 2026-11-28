@@ -301,10 +301,8 @@ class DataIngestion(ABC):
             fields.trip_start_time in df_feed.columns
             and fields.trip_start_date in df_feed.columns
         ):
-            df_feed[fields.trip_start_timestamp] = pd.to_datetime(
-                df_feed[fields.trip_start_date] + " " + df_feed[fields.trip_start_time],
-                format=cons.TRIP_START_TIMESTAMP_FORMAT,
-                errors="coerce",
+            df_feed[fields.trip_start_timestamp] = DataIngestion._parse_trip_start(
+                df_feed[fields.trip_start_date], df_feed[fields.trip_start_time]
             )
 
         process_cols = df_feed.dtypes[df_feed.dtypes == "object"]
@@ -322,6 +320,42 @@ class DataIngestion(ABC):
                 )
 
         return df_feed
+
+    @staticmethod
+    def _parse_trip_start(start_date: pd.Series, start_time: pd.Series) -> pd.Series:
+        """
+        Combine GTFS trip start descriptors into local wall-clock timestamps.
+
+        GTFS writes trips that run after midnight with hours of 24 or more on
+        the previous service day, for example ``20261104`` + ``24:14:00``.
+        Adding the start time to midnight of the start date as a duration
+        gives the correct wall time (``2026-11-05 00:14:00``).
+
+        Parameters
+        ----------
+        start_date : pandas.Series
+            GTFS ``start_date`` strings in ``YYYYMMDD`` format.
+        start_time : pandas.Series
+            GTFS ``start_time`` strings in ``HH:MM:SS`` format, where ``HH``
+            may be 24 or greater.
+
+        Returns
+        -------
+        pandas.Series
+            ``datetime64`` timestamps, with ``NaT`` where either descriptor is
+            missing or malformed.
+        """
+        dates = pd.to_datetime(
+            start_date, format=cons.TRIP_START_DATE_FORMAT, errors="coerce"
+        )
+        valid_time = (
+            start_time.astype("string")
+            .str.fullmatch(cons.TRIP_START_TIME_PATTERN)
+            .fillna(False)
+            .astype(bool)
+        )
+        times = pd.to_timedelta(start_time.where(valid_time), errors="coerce")
+        return dates + times
 
     @staticmethod
     def _to_python_datetime(value, unit=None):

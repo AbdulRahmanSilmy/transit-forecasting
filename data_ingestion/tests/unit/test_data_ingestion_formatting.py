@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from data_ingestion import constants as cons
 from data_ingestion import data_ingestion as di
@@ -51,6 +52,62 @@ def test_format_df_feed_adds_timestamp_and_normalizes():
     assert trip_fields.trip_start_timestamp in formatted.columns
     assert formatted[vehicle_fields.timestamp].dtype == object
     assert formatted[vehicle_fields.feed_timestamp].dtype == object
+
+
+@pytest.mark.parametrize(
+    ("start_date", "start_time", "expected"),
+    [
+        ("20261104", "12:00:00", pd.Timestamp("2026-11-04 12:00:00")),
+        ("20261104", "08:05:30", pd.Timestamp("2026-11-04 08:05:30")),
+        ("20261104", "24:14:00", pd.Timestamp("2026-11-05 00:14:00")),
+        ("20261104", "25:58:00", pd.Timestamp("2026-11-05 01:58:00")),
+        ("20261231", "24:30:00", pd.Timestamp("2027-01-01 00:30:00")),
+    ],
+)
+def test_parse_trip_start_handles_post_midnight_times(start_date, start_time, expected):
+    result = di.DataIngestion._parse_trip_start(
+        pd.Series([start_date]), pd.Series([start_time])
+    )
+
+    assert result.iloc[0] == expected
+
+
+@pytest.mark.parametrize(
+    ("start_date", "start_time"),
+    [
+        (None, "12:00:00"),
+        ("20261104", None),
+        ("", "12:00:00"),
+        ("20261104", ""),
+        ("2026-11-04", "12:00:00"),
+        ("20261104", "1 day"),
+        ("20261104", "12:00"),
+    ],
+)
+def test_parse_trip_start_returns_nat_for_missing_or_malformed(start_date, start_time):
+    result = di.DataIngestion._parse_trip_start(
+        pd.Series([start_date], dtype=object), pd.Series([start_time], dtype=object)
+    )
+
+    assert pd.isna(result.iloc[0])
+
+
+def test_format_df_feed_keeps_post_midnight_trip_start():
+    ingestion = _ingestion()
+    trip_fields = cons.TripTableIngestionFields
+    df = pd.DataFrame(
+        {
+            trip_fields.trip_start_date: ["20261104", "20261104"],
+            trip_fields.trip_start_time: ["23:50:00", "24:14:00"],
+        }
+    )
+
+    formatted = ingestion._format_df_feed(df)
+
+    assert list(formatted[trip_fields.trip_start_timestamp]) == [
+        pd.Timestamp("2026-11-04 23:50:00"),
+        pd.Timestamp("2026-11-05 00:14:00"),
+    ]
 
 
 def test_prepare_insert_rows_uses_ingestion_field_order():
