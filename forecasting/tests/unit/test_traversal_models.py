@@ -187,3 +187,51 @@ def test_residual_hour_model_is_registered():
     assert isinstance(model, ResidualHourCorrection)
     assert isinstance(model.base, HarmonicTraversal)
     assert model.shrinkage == 30
+
+
+def test_centred_residual_hour_correction_keeps_only_the_hour_shape():
+    # A runs 60 s slow at every hour (a segment level) and 120 s slower at 8 am.
+    links = _links({"A": (5.0, 1)}, peaks={"A": {8: 1.6}})
+    links["traversal_seconds"] += 60.0
+    model = ResidualHourCorrection(SegmentMedianTraversal(), TIMEZONE, centred=True)
+    model.fit(links)
+    base = SegmentMedianTraversal().fit(links)
+    n = 28  # one link per day per cell
+    segment_mean = 180 / 17  # A's mean residual over 17 hours (median = 360 s)
+    shrink = n / (n + 30)
+    prediction = model.predict(_requests("A", [8, 12]))
+    expected = base.predict(_requests("A", [8, 12])) + shrink * (
+        np.array([180.0, 0.0]) - segment_mean
+    )
+    np.testing.assert_allclose(prediction, expected)
+    # The corrections average to 0 over the segment's links: no level shift.
+    fitted = model.predict(links) - base.predict(links)
+    assert fitted.mean() == pytest.approx(0.0, abs=1e-9)
+
+
+def test_centred_correction_is_zero_for_unseen_cells_and_segments():
+    links = _links({"A": (5.0, 1)}, peaks={"A": {8: 1.4}})
+    model = ResidualHourCorrection(SegmentMedianTraversal(), TIMEZONE, centred=True)
+    model.fit(links)
+    base = SegmentMedianTraversal().fit(links)
+    unseen = pd.concat(
+        [
+            _requests("A", [3]),
+            pd.DataFrame(
+                {
+                    "segment_key": ["Z"],
+                    "scheduled_departure": _requests("A", [8])["scheduled_departure"],
+                }
+            ),
+        ],
+        ignore_index=True,
+    )
+    np.testing.assert_array_equal(model.predict(unseen), base.predict(unseen))
+
+
+def test_centred_residual_hour_model_is_registered():
+    model = make_traversal_model("harmonic_residual_hour_centred", TIMEZONE)
+    assert isinstance(model, ResidualHourCorrection)
+    assert isinstance(model.base, HarmonicTraversal)
+    assert model.centred and model.shrinkage == 30
+    assert not make_traversal_model("harmonic_residual_hour", TIMEZONE).centred

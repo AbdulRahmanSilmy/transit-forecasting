@@ -345,6 +345,27 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
 - Verdict: **keep (data fix).** E016 is the new reference baseline: harmonic 132.9 s, B3 134.2 s, B0 162.8 s on 29,292 rows. Earlier entries scored a set without overnight service and aren't directly comparable to E016 onwards. E015 (H8) should be rerun on the new data once its shuffled-control failure is resolved.
 - Next: a dwell rule keyed to time of day would stop overnight dwells pulling daytime medians down (relevant to H7/H9; needs an owner-approved harness change). Candidates could add a separate overnight level or let harmonic regularise more strongly near the wrap-around.
 
+### E017: harmonic plus the centred per-segment × hour correction (H8 option (c), #25)
+
+- Hypothesis: H8, option (c) chosen by the owner after E015's shuffled control failed (2026-11-27). E015's correction mixed two effects: a per-segment level (each segment's mean residual) and the hour shape within the segment. The shuffled control keeps the level, which is why it beat B2. This run keeps **only the hour shape**: harmonic's training residuals by segment × local hour have a within-segment pattern that recurs in the evaluation week, and adding it lowers delay MAE.
+- Exploration: [caac058acb7e40b982c5dd3bdbf0acdb](http://127.0.0.1:5000/#/experiments/1/runs/caac058acb7e40b982c5dd3bdbf0acdb) (2 figures; training residuals refit per fold, plus E016's out-of-sample residuals, dev folds only).
+
+  1. **Per link the hour shape barely carries over.** Across 765 segment × hour × fold cells (≥ 20 block links), the in-sample centred correction predicts the block's centred bias with r = 0.12 and slope 0.30 (per fold 0.11–0.51). The corrections are small (mean |c| 5.1 s). A cell correction lowers expected squared cell bias only when the slope exceeds 0.5, so traversal MAE should not improve.
+
+     ![In-sample hour shape vs the evaluation week, per cell](figures/E017/01_insample_vs_block_hour_shape.png)
+
+  2. **Summed over the route it carries over better** (r = 0.43, slope 0.61 over 120 fold × hour points), driven by two hours where harmonic's smooth daily curve misses a sharp shape. At **16:00** the correction adds +135 to +184 s over the route, and every block is also under-predicted there (+30 to +190 s). At **01:00** (the overnight trips added in E016) it removes 63 to 112 s, and the blocks agree (−10 to −115 s). Other hours are noise.
+
+     ![Route-level hour shape by fold](figures/E017/02_route_hour_shape_by_fold.png)
+
+- Design (fixed before scoring): `ResidualHourCorrection(harmonic_huber, centred=True)`, registered as `harmonic_residual_hour_centred`. Correction per cell = n/(n + k) × (cell mean − segment mean) of harmonic's in-sample residuals, k = 30 as in E015; 0 for unseen cells and segments. Over a segment's training links the corrections average to about 0, so the model can't shift a segment. Single run, no tuning.
+- Prediction before running (reference E016: harmonic 132.9 s scored, 115.5 s anchor-free, traversal MAE 33.0 s, bias −1.2 s):
+  - **Shuffled control passes**, at about 255 s like E016 (threshold 0.99 × B2).
+  - Traversal MAE 33.0–33.4 s (flat or slightly worse); traversal bias within ±1 s of −1.2 s (no level shift).
+  - Scored delay MAE −0.5 to −2.5 s vs harmonic (130.4–132.4 s); anchor-free delay MAE −0.5 to −2.5 s (113.0–115.0 s). The gain sits in the 15–17 h hours and the `early` (overnight) period.
+  - Δ vs B3 from −1.3 s to about −2 to −4 s, with the CI likely still spanning 0, so an **inconclusive** verdict is the most likely outcome.
+- Git: <pending>   MLflow run: <pending>
+
 <!-- Template for new entries:
 
 ### E0NN: <short title>
