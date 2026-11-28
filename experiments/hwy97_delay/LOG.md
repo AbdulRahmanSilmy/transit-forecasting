@@ -428,9 +428,9 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
 
   ![Δ delay MAE vs E017 by stop](figures/E018/06_result_delta_vs_e017_by_stop.png)
 
-  - **Actual vs predicted (owner request, 2026-11-28).** Transit BC's earliest estimate is exactly 0 s for every visit. Both chained methods follow the actual delay up to about 5 min, then flatten at about 3 min for actual delays of 10–18 min (incidents, out of scope). E018's cloud is tighter where E017 ran early: the hold floors pull those forecasts towards the schedule.
+  - **Predicted vs actual (owner request, 2026-11-28).** Transit BC's earliest estimate is exactly 0 s for every visit, so its panel is a vertical line (median actual 1.5 min). E018's median actual per 1-min bin of predicted follows y = x from −1 to 10 min (predicted 4.5 → actual 4.5 min, 8.5 → 7.4). E017 over-forecasts from 4 to 9 min (5.5 → 3.9, 8.5 → 6.6). Both are still too early below about −2 min predicted (actual median about −0.5 min), and neither forecasts the large delays (incidents, out of scope).
 
-  ![Actual vs predicted delay: Transit BC, E017, E018](figures/E018/08_actual_vs_predicted_scatter_b0_e017_e018_v2.png)
+  ![Predicted vs actual delay: Transit BC, E017, E018](figures/E018/09_predicted_vs_actual_scatter_b0_e017_e018.png)
 
 - Sanity checks: leakage assertions passed; identical rows across methods (0 unscorable); **shuffled control passed** (191.0 s vs B2 188.8, threshold 186.9). Before the run, `--dwell stop_median` reproduced E017's predictions exactly.
 - Interpretation: **direction right, size underestimated.**
