@@ -90,10 +90,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "--dwell",
-        default="stop_median",
+        default="stop_hold",
         help="Dwell model for B2, B3, the candidate and the control: "
-        "'stop_median' (per-stop training median, default) or 'stop_hold' "
-        "(per-stop hold floor on the predicted arrival delay).",
+        "'stop_hold' (per-stop hold floor on the predicted arrival delay; the "
+        "study's rule since 2026-11-28, default) or 'stop_median' (per-stop "
+        "training median, the rule for E001-E017).",
     )
     parser.add_argument("--split", choices=["dev", "test"], default="dev")
     parser.add_argument("--i-have-owner-approval", action="store_true")
