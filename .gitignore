@@ -10,3 +10,6 @@ setup_road_segment_congestion_env.sh
 **/build/
 visuals/
 notebooks/misc/
+
+# Claude Code worktrees (one per parallel session)
+.claude/worktrees/

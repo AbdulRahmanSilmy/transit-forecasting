@@ -24,6 +24,20 @@
 	- `cd forecasting && conda run -n transit_env python -m pytest tests/unit -q`
 	- `cd data_ingestion && conda run -n transit_env python -m pytest tests/unit -q`
 - MySQL integration tests (Docker): `cd data_ingestion && ./run_integration_tests.sh`
+- Use `python -m pytest`, not bare `pytest`. `transit_env` has `data_ingestion` and
+  `forecasting` installed in editable mode, pointing at the main checkout. `python -m`
+  puts the current directory first on the import path, so tests run against the code
+  in the checkout you're in (this matters inside a worktree).
+
+## Parallel Sessions (Git Worktrees)
+- Run each concurrent agent session in its own worktree under `.claude/worktrees/`,
+  on its own branch: `git worktree add .claude/worktrees/<name> -b <name> <base-branch>`.
+- Never switch branches in a checkout another session is using.
+- `.worktreeinclude` lists gitignored files (the `.env` files) to copy into new worktrees.
+  For worktrees created by hand with `git worktree add`, copy them yourself.
+- Run `./run_integration_tests.sh` from one session at a time: every worktree shares the
+  same `transit_mysql` container and volume.
+- Clean up when finished: `git worktree remove .claude/worktrees/<name>`.
 
 ## Research Loop
 - Research studies live in `experiments/<study>/` (`RESEARCH.md` charter, `LOG.md` ledger, `HARNESS.md` contract). Run iterations with the `research-loop` skill.

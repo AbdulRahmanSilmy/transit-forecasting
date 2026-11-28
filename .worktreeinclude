@@ -1,0 +1,3 @@
+# Gitignored files that Claude Code copies into each new worktree.
+# Same pattern syntax as .gitignore.
+**/.env
