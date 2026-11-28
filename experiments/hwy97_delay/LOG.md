@@ -439,7 +439,7 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
   - Almost all of it comes from stop 6. Stop 3's floor rarely acts (stop 4 −0.1 s). Stop 10 adds about 4.6 s at stop 11. Stop 12 adds nothing.
   - The one-step check in exploration plot 3 showed stop 10 is still biased −13 s (long dwells by some late buses), and the hour structure (plot 4) is unused.
 - Verdict: **keep.** Against E017, on the anchor-free score that decides propagation hypotheses: −8.1 s [−9.6, −6.5], negative in every fold (−5.7 to −11.7 s). New best: `harmonic_residual_hour_centred` with `--dwell stop_hold` (121.4 s scored, 104.2 s anchor-free). Holds are learned per stop from training links, with no route constants. **Owner decision (2026-11-28): adopted.** `stop_hold` is now the study's dwell rule and the CLI default (RESEARCH.md Definitions and Decisions), and E018 is the new reference baseline.
-- Next: (1) **H11**: recovery that depends on hour (stop 6 in the 14–16 h peak, stop 10 midday). (2) Recheck E017's evening loss and H10 on top of the hold chain. (3) The 5% criterion is easily met on dev now; the locked test (#20) stays owner-only.
+- Next: (1) **H11** ([#46](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/46)): recovery that depends on hour (stop 6 in the 14–16 h peak, stop 10 midday). (2) Recheck E017's evening loss and H10 on top of the hold chain. (3) The 5% criterion is easily met on dev now; the locked test (#20) stays owner-only.
 
 <!-- Template for new entries:
 
