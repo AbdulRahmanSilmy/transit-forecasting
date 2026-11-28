@@ -20,6 +20,13 @@ import numpy as np
 import pandas as pd
 
 from .anchor_models import FEED_ANCHOR, AnchorModel, make_anchor_model
+from .dwell_models import (
+    DEFAULT_DWELL,
+    DWELL_REQUEST_COLUMNS,
+    DwellModel,
+    StopMedianDwell,
+    make_dwell_model,
+)
 from .feed_clock import journey_timetable_offsets, timetable_offset_summary
 from .road_segment_congestion import _normalize_direction_ids, _require_columns
 from .traversal_models import (
@@ -590,6 +597,23 @@ def prepare_origin_visits(
         upstream["final_departure_time"] - upstream["final_arrival_time"]
     ).dt.total_seconds()
     links.loc[links["upstream_is_first_stop"], "upstream_dwell_seconds"] = np.nan
+    # Origin-time scheduled dwell (feed fields), zero at the first stop.
+    links["scheduled_dwell_seconds"] = (
+        (links["feed_scheduled_departure"] - links["upstream_feed_scheduled_arrival"])
+        .dt.total_seconds()
+        .where(~links["upstream_is_first_stop"], 0.0)
+    )
+    # Observed arrival delay at the upstream stop, for training dwell models
+    # that respond to delay; NaN when that arrival report is stale.
+    links["upstream_arrival_delay_seconds"] = (
+        (upstream["final_arrival_time"] - upstream["scheduled_arrival"])
+        .dt.total_seconds()
+        .where(
+            ~(upstream["final_arrival_time"] - upstream["final_feed_timestamp"]).gt(
+                max_age
+            )
+        )
+    )
     links["available_at"] = pd.concat(
         [links["final_feed_timestamp"], upstream["final_feed_timestamp"]], axis=1
     ).max(axis=1)
@@ -638,6 +662,8 @@ def prepare_origin_visits(
         "link_ok",
         "traversal_seconds",
         "upstream_dwell_seconds",
+        "scheduled_dwell_seconds",
+        "upstream_arrival_delay_seconds",
         "available_at",
         "train_exclusion_reason",
     ]
@@ -649,49 +675,8 @@ def prepare_origin_visits(
     )
 
 
-class StopDwellMedian:
-    """Per-upstream-stop training median dwell, the study's fixed dwell rule.
-
-    Negative or missing dwell, and dwell at a journey's first stop (layover),
-    are ignored. Unseen stops use the pooled median; no data gives zero.
-    """
-
-    def fit(self, links: pd.DataFrame) -> StopDwellMedian:
-        """Learn medians from training links.
-
-        Parameters
-        ----------
-        links : pandas.DataFrame
-            Training links with ``from_stop_id`` and ``upstream_dwell_seconds``.
-
-        Returns
-        -------
-        StopDwellMedian
-            Fitted rule.
-        """
-        valid = links.loc[links["upstream_dwell_seconds"].ge(0)]
-        self.medians_ = valid.groupby("from_stop_id")["upstream_dwell_seconds"].median()
-        pooled = valid["upstream_dwell_seconds"].median()
-        self.pooled_ = 0.0 if pd.isna(pooled) else float(pooled)
-        return self
-
-    def predict(self, links: pd.DataFrame) -> np.ndarray:
-        """Return dwell seconds at each link's upstream stop.
-
-        Parameters
-        ----------
-        links : pandas.DataFrame
-            Links with ``from_stop_id`` and ``upstream_is_first_stop``.
-
-        Returns
-        -------
-        numpy.ndarray
-            Nonnegative dwell; zero where the upstream stop is the first stop.
-        """
-        dwell = links["from_stop_id"].map(self.medians_).fillna(self.pooled_)
-        dwell = np.array(dwell, dtype=float)
-        dwell[links["upstream_is_first_stop"].to_numpy(bool)] = 0.0
-        return dwell
+# The study's default dwell rule now lives in :mod:`forecasting.dwell_models`.
+StopDwellMedian = StopMedianDwell
 
 
 def chain_delay_forecast(
@@ -748,6 +733,75 @@ def chain_delay_forecast(
         (arrival - visits["scheduled_arrival"]).dt.total_seconds().to_numpy(),
         index=visits.index,
     )
+
+
+def chain_with_dwell_model(
+    visits: pd.DataFrame,
+    links: pd.DataFrame,
+    traversal_seconds: np.ndarray,
+    dwell_model: DwellModel,
+) -> tuple[pd.Series, np.ndarray]:
+    """Chain stop by stop with a dwell model that responds to predicted delay.
+
+    Walks each journey's links in order. Before each link it gives the dwell
+    model the chain's predicted arrival delay at the upstream stop (anchor
+    plus the elapsed time so far, minus the upstream scheduled arrival), then
+    adds the predicted dwell and traversal. With the dwell array fixed, the
+    result is exactly :func:`chain_delay_forecast`.
+
+    Parameters
+    ----------
+    visits : pandas.DataFrame
+        Prepared visits with ``trip_instance_key``, ``stop_sequence``,
+        ``is_first_stop``, ``anchor_time`` and ``scheduled_arrival``.
+    links : pandas.DataFrame
+        Links of the same journeys with ``trip_instance_key``,
+        ``stop_sequence``, ``upstream_feed_scheduled_arrival`` and the
+        ``DWELL_REQUEST_COLUMNS``.
+    traversal_seconds : numpy.ndarray
+        Traversal forecasts aligned with ``links``.
+    dwell_model : DwellModel
+        Fitted model; called with ``arrival_delay_seconds`` if it sets
+        ``uses_arrival_delay``.
+
+    Returns
+    -------
+    delay : pandas.Series
+        Forecast arrival delay in seconds, indexed like ``visits``.
+    dwell : numpy.ndarray
+        Dwell seconds used at each link's upstream stop, aligned with
+        ``links``.
+    """
+    requests = links[list(DWELL_REQUEST_COLUMNS)]
+    if not getattr(dwell_model, "uses_arrival_delay", False):
+        dwell = np.asarray(dwell_model.predict(requests), dtype=float)
+        return chain_delay_forecast(visits, links, traversal_seconds, dwell), dwell
+    traversal = np.asarray(traversal_seconds, dtype=float)
+    first = visits.loc[visits["is_first_stop"]].set_index("trip_instance_key")
+    anchor = links["trip_instance_key"].map(first["anchor_time"])
+    order = np.lexsort(
+        (links["stop_sequence"].to_numpy(), links["trip_instance_key"].to_numpy())
+    )
+    keys = links["trip_instance_key"].to_numpy()[order]
+    position = pd.Series(keys).groupby(keys).cumcount().to_numpy()
+    upstream_offset = (
+        (links["upstream_feed_scheduled_arrival"] - anchor).dt.total_seconds()
+    ).to_numpy()[order]
+    elapsed_before = np.zeros(len(links))
+    dwell_sorted = np.full(len(links), np.nan)
+    for step in range(int(position.max()) + 1 if len(links) else 0):
+        at = np.flatnonzero(position == step)
+        if step > 0:
+            elapsed_before[at] = elapsed_before[at - 1] + (
+                dwell_sorted[at - 1] + traversal[order[at - 1]]
+            )
+        arrival_delay = elapsed_before[at] - upstream_offset[at]
+        dwell_sorted[at] = dwell_model.predict(
+            requests.iloc[order[at]], arrival_delay_seconds=arrival_delay
+        )
+    dwell = np.empty(len(links))
+    dwell[order] = dwell_sorted
+    return chain_delay_forecast(visits, links, traversal, dwell), dwell
 
 
 def first_stop_departures(
@@ -887,6 +941,8 @@ def evaluate_block(
     model_factory: Callable[[str, str], TraversalModel] = make_traversal_model,
     anchor_name: str = FEED_ANCHOR,
     anchor_factory: Callable[[str, str], AnchorModel] = make_anchor_model,
+    dwell_name: str = DEFAULT_DWELL,
+    dwell_factory: Callable[[str], DwellModel] = make_dwell_model,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit on links available before the cutoff and forecast one block.
 
@@ -913,6 +969,12 @@ def evaluate_block(
         and B1 always use the feed.
     anchor_factory : callable, optional
         ``(name, timezone) -> AnchorModel``; injectable for tests.
+    dwell_name : str, default 'stop_median'
+        Dwell model for B2, B3, the candidate and the control (see
+        :mod:`forecasting.dwell_models`), fitted once on the fold's training
+        links. B0 and B1 do not use it.
+    dwell_factory : callable, optional
+        ``name -> DwellModel``; injectable for tests.
 
     Returns
     -------
@@ -923,14 +985,18 @@ def evaluate_block(
         ``actual_departure_delay_s`` (the journey's final reported first-stop
         departure delay) and ``chain_anchor_delay_s`` (the anchor the
         chained methods started from) are evaluation-only; they feed the
-        anchor-free score.
+        anchor-free score. With a dwell model that responds to predicted
+        delay, ``anchor_free_pred_<method>`` holds each chained method
+        re-chained from the actual first-stop departure (a shift is not
+        exact once dwell depends on delay).
     link_rows : pandas.DataFrame
         One row per segment traversal of the block's scored journeys with a
         valid observed outcome: ``actual_traversal_s``, ``actual_dwell_s``
         (upstream dwell; NaN at the first stop), ``trav_<method>`` predictions
         (B0 is the feed's scheduled run time) and ``dwell_<method>``
         predictions (``dwell_B0_transit_bc`` is the scheduled dwell;
-        ``dwell_model`` is the median rule every chained method uses).
+        ``dwell_model`` is the dwell model's prediction, along the
+        candidate's chain, or B3's when the candidate is a baseline).
 
     Raises
     ------
@@ -960,7 +1026,8 @@ def evaluate_block(
     requests = eval_links[list(REQUEST_COLUMNS)].copy()
     assert list(requests.columns) == list(REQUEST_COLUMNS)
 
-    dwell = StopDwellMedian().fit(train).predict(eval_links)
+    dwell_model = dwell_factory(dwell_name).fit(train)
+    delay_aware = bool(getattr(dwell_model, "uses_arrival_delay", False))
     rows = scored[
         [
             "trip_instance_key",
@@ -1027,6 +1094,16 @@ def evaluate_block(
     rows["chain_anchor_delay_s"] = (
         scored["trip_instance_key"].map(chain_anchor).astype(float)
     )
+    if delay_aware:
+        # Evaluation only: the same chain started from the actual departure.
+        actual_start = eval_visits["trip_instance_key"].map(departure_delay)
+        first_departure = eval_visits["trip_instance_key"].map(
+            first_stop["scheduled_departure"]
+        )
+        actual_visits = eval_visits.assign(
+            anchor_time=first_departure
+            + pd.to_timedelta(actual_start.astype(float).to_numpy(), unit="s")
+        )
     methods: dict[str, TraversalModel] = {
         B2: model_factory("segment_median", config.timezone),
         B3: model_factory("calendar_median", config.timezone),
@@ -1069,15 +1146,24 @@ def evaluate_block(
     links_out[f"dwell_{B0}"] = scheduled_dwell.where(
         ~eval_links["upstream_is_first_stop"], 0.0
     )
-    links_out["dwell_model"] = dwell
+    dwell_owner = model_name if model_name in methods else B3
     for name, model in methods.items():
         model.fit(train)
         traversal = np.asarray(model.predict(requests), dtype=float)
         if traversal.shape != (len(requests),):
             raise ValueError(f"{name} returned {traversal.shape} predictions.")
-        chained = chain_delay_forecast(chain_visits, eval_links, traversal, dwell)
+        chained, dwell = chain_with_dwell_model(
+            chain_visits, eval_links, traversal, dwell_model
+        )
         rows[f"pred_{name}"] = chained.loc[scored.index]
+        if delay_aware:
+            anchor_free, _ = chain_with_dwell_model(
+                actual_visits, eval_links, traversal, dwell_model
+            )
+            rows[f"anchor_free_pred_{name}"] = anchor_free.loc[scored.index]
         links_out[f"trav_{name}"] = traversal
+        if name == dwell_owner:
+            links_out["dwell_model"] = dwell
     # Observed traversals must be valid outcomes (not stale, skipped, etc.).
     links_out = links_out.loc[links_out["train_exclusion_reason"].eq("included")]
     links_out = links_out.drop(columns="train_exclusion_reason")
@@ -1176,7 +1262,8 @@ def anchor_free_scores(
     chained forecast inherits its anchor error. This secondary score removes
     it: each chained prediction is shifted by ``chain_anchor_delay_s -
     actual_departure_delay_s``, so only the delay accumulated after the first
-    stop is judged. B1 becomes "delay stays as at the actual departure". B0
+    stop is judged. Where ``anchor_free_pred_<method>`` exists (a dwell model
+    that responds to delay), that re-chained prediction is used instead. B1 becomes "delay stays as at the actual departure". B0
     (Transit BC's own per-stop estimate) is not chained and is excluded.
 
     Parameters
@@ -1210,6 +1297,8 @@ def anchor_free_scores(
     for method in scored_methods:
         if method == B1:
             shifted[f"pred_{B1}"] = actual
+        elif f"anchor_free_pred_{method}" in shifted:
+            shifted[f"pred_{method}"] = shifted[f"anchor_free_pred_{method}"]
         else:
             shifted[f"pred_{method}"] = shifted[f"pred_{method}"] - (
                 shifted["chain_anchor_delay_s"] - actual
@@ -1525,6 +1614,7 @@ def run_study(
     today: date | None = None,
     model_factory: Callable[[str, str], TraversalModel] = make_traversal_model,
     anchor: str = FEED_ANCHOR,
+    dwell: str = DEFAULT_DWELL,
 ) -> StudyRun:
     """Run the development folds or the locked test for one candidate.
 
@@ -1546,6 +1636,8 @@ def run_study(
         Traversal model factory; injectable for tests.
     anchor : str, default 'feed'
         Chain anchor for B2, B3 and the candidate (see :func:`evaluate_block`).
+    dwell : str, default 'stop_median'
+        Dwell model for the chained methods (see :func:`evaluate_block`).
 
     Returns
     -------
@@ -1608,6 +1700,7 @@ def run_study(
             fold=label,
             model_factory=model_factory,
             anchor_name=anchor,
+            dwell_name=dwell,
         )
         for label, start, days in blocks
     ]
@@ -1621,6 +1714,7 @@ def run_study(
         "split": split,
         "model": model_name,
         "anchor": anchor,
+        "dwell": dwell,
         "blocks": [
             {
                 "fold": label,
@@ -1683,6 +1777,9 @@ def log_row(
     delta_best = summary[method] - baselines.min()
     anchor = run.info.get("anchor", FEED_ANCHOR)
     anchor_note = "" if anchor == FEED_ANCHOR else f" + {anchor} anchor"
+    dwell = run.info.get("dwell", DEFAULT_DWELL)
+    if dwell != DEFAULT_DWELL:
+        anchor_note += f" + {dwell} dwell"
     anchor_free = run.metrics.get("anchor_free")
     anchor_free_note = ""
     if anchor_free is not None and len(anchor_free["summary"]):

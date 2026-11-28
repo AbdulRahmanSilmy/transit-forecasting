@@ -88,6 +88,14 @@ def main(argv: list[str] | None = None) -> None:
         help="Chain anchor for B2, B3 and the candidate: 'feed' (Transit BC's "
         "earliest estimate, default) or an anchor model, e.g. calendar_median.",
     )
+    parser.add_argument(
+        "--dwell",
+        default="stop_hold",
+        help="Dwell model for B2, B3, the candidate and the control: "
+        "'stop_hold' (per-stop hold floor on the predicted arrival delay; the "
+        "study's rule since 2026-11-28, default) or 'stop_median' (per-stop "
+        "training median, the rule for E001-E017).",
+    )
     parser.add_argument("--split", choices=["dev", "test"], default="dev")
     parser.add_argument("--i-have-owner-approval", action="store_true")
     parser.add_argument("--no-write", action="store_true", help="Skip saving outputs.")
@@ -114,17 +122,19 @@ def main(argv: list[str] | None = None) -> None:
             split=args.split,
             approved=args.i_have_owner_approval,
             anchor=args.anchor,
+            dwell=args.dwell,
         )
 
     git_hash = _git("rev-parse", "--short", "HEAD")
     dirty = bool(_git("status", "--porcelain"))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     anchor_tag = "" if args.anchor == "feed" else f"_anchor-{args.anchor}"
-    run_id = f"{stamp}_{args.model}{anchor_tag}_{args.split}"
+    dwell_tag = "" if args.dwell == "stop_median" else f"_dwell-{args.dwell}"
+    run_id = f"{stamp}_{args.model}{anchor_tag}{dwell_tag}_{args.split}"
     metrics = run.metrics
     with pd.option_context("display.width", 200, "display.max_columns", 20):
         print(
-            f"\nRun {run_id}  anchor {args.anchor}  git {git_hash}"
+            f"\nRun {run_id}  anchor {args.anchor}  dwell {args.dwell}  git {git_hash}"
             f"{' (DIRTY)' if dirty else ''}"
         )
         print(
@@ -219,6 +229,7 @@ def main(argv: list[str] | None = None) -> None:
                     params={
                         "model": args.model,
                         "anchor": args.anchor,
+                        "dwell": args.dwell,
                         "split": args.split,
                         "config": config.to_dict(),
                     },
@@ -228,6 +239,7 @@ def main(argv: list[str] | None = None) -> None:
                         "split": args.split,
                         "model": args.model,
                         "anchor": args.anchor,
+                        "dwell": args.dwell,
                         "hypothesis": args.hypothesis,
                         "log_id": args.log_id,
                         "locked_test": str(args.split == "test"),

@@ -607,7 +607,7 @@ def make_segment_timeseries_figure(
             dict(color=SERIES_COLORS[0], size=8, opacity=0.75),
         ),
         (
-            "Dwell: stop median (our models)",
+            "Dwell: our dwell model",
             dwell["dwell_model"] / 60,
             dict(color=SERIES_COLORS[1], size=8, opacity=0.75, symbol="diamond"),
         ),

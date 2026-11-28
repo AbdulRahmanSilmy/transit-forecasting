@@ -14,6 +14,7 @@ from forecasting.delay_forecast_eval import (
     StopDwellMedian,
     StudyConfig,
     chain_delay_forecast,
+    chain_with_dwell_model,
     check_test_access,
     day_bootstrap_delta,
     evaluate_block,
@@ -25,6 +26,7 @@ from forecasting.delay_forecast_eval import (
     score_predictions,
     write_run,
 )
+from forecasting.dwell_models import StopMedianDwell
 from forecasting.traversal_models import (
     CalendarMedianTraversal,
     SegmentMedianTraversal,
@@ -675,3 +677,126 @@ def test_calendar_anchor_learns_hour_and_falls_back_to_pooled():
     np.testing.assert_allclose(model.predict(requests), [110.0, 20.0, 100.0])
     with pytest.raises(ValueError):
         make_anchor_model("nope", "America/Vancouver")
+
+
+def test_links_carry_scheduled_dwell_and_upstream_arrival_delay():
+    links = _prepare(pd.DataFrame(_journey("a", "2026-10-01 15:00"))).links
+    links = links.set_index("stop_sequence")
+    assert links["scheduled_dwell_seconds"].eq(0).all()
+    # Stop 2 is reached 20 s early; stop 3 is 30 s late (20 s dwell, 330 s link).
+    assert np.isnan(links.loc[2, "upstream_arrival_delay_seconds"])
+    assert links.loc[3, "upstream_arrival_delay_seconds"] == -20
+    assert links.loc[4, "upstream_arrival_delay_seconds"] == 30
+
+
+def test_stale_upstream_arrival_gives_no_training_arrival_delay():
+    updates = pd.DataFrame(_journey("a", "2026-10-01 15:00"))
+    final = updates["feed_timestamp"].eq(updates["feed_timestamp"].max())
+    stale = final & updates["stop_sequence"].eq(2)
+    updates.loc[stale, "feed_timestamp"] -= pd.Timedelta(minutes=30)
+    links = _prepare(updates).links.set_index("stop_sequence")
+    assert np.isnan(links.loc[3, "upstream_arrival_delay_seconds"])
+    assert links.loc[4, "upstream_arrival_delay_seconds"] == 30
+
+
+def test_chain_with_median_dwell_equals_the_plain_sum():
+    prepared = _prepare(_updates(days=3))
+    links = prepared.links
+    traversal = links["traversal_seconds"].to_numpy()
+    model = StopMedianDwell().fit(links)
+    chained, dwell = chain_with_dwell_model(prepared.visits, links, traversal, model)
+    expected = chain_delay_forecast(
+        prepared.visits, links, traversal, StopDwellMedian().fit(links).predict(links)
+    )
+    pd.testing.assert_series_equal(chained, expected)
+    np.testing.assert_allclose(dwell, model.predict(links))
+
+
+class _HoldAtStop2:
+    """Waits at s2 until on schedule; otherwise no dwell. Records requests."""
+
+    uses_arrival_delay = True
+
+    def __init__(self):
+        self.seen = []
+
+    def fit(self, links):
+        return self
+
+    def predict(self, requests, arrival_delay_seconds=None):
+        self.seen.append(
+            pd.Series(arrival_delay_seconds, index=requests["from_stop_id"].to_numpy())
+        )
+        hold = requests["from_stop_id"].eq("s2").to_numpy()
+        return np.where(hold, np.maximum(0.0, -arrival_delay_seconds), 0.0)
+
+
+def test_chain_gives_the_dwell_model_its_own_predicted_arrival_delay():
+    prepared = _prepare(pd.DataFrame(_journey("a", "2026-10-01 15:00")))
+    links = prepared.links.sort_values("stop_sequence", ascending=False)
+    model = _HoldAtStop2()
+    chained, dwell = chain_with_dwell_model(
+        prepared.visits, links, np.array([290.0, 330.0, 280.0]), model
+    )
+    seen = pd.concat(model.seen)
+    # 20 s early at s2 (280 s link), held 20 s, then 30 s late at s3.
+    assert seen["s2"] == pytest.approx(-20) and seen["s3"] == pytest.approx(30)
+    by_stop = chained.groupby(prepared.visits["stop_sequence"]).first()
+    assert by_stop[2] == pytest.approx(-20)
+    assert by_stop[3] == pytest.approx(30)
+    assert by_stop[4] == pytest.approx(20)
+    # Dwell comes back aligned with the (reordered) links.
+    np.testing.assert_allclose(dwell, [0.0, 20.0, 0.0])
+
+
+def test_delay_aware_dwell_rechains_the_anchor_free_score():
+    config = _config()
+    prepared = _prepare(_updates(departure_lags={15: 120, 19: 30, 22: 30}))
+    kwargs = dict(
+        model_name="calendar_median",
+        block_start=date(2026, 10, 7),
+        block_days=1,
+        config=config,
+        fold="f",
+    )
+    median_rows, _ = evaluate_block(prepared, **kwargs)
+    assert not any(c.startswith("anchor_free_pred_") for c in median_rows)
+    rows, links = evaluate_block(
+        prepared,
+        dwell_name="hold2",
+        dwell_factory=lambda name: _HoldAtStop2(),
+        **kwargs,
+    )
+    assert {f"anchor_free_pred_{m}" for m in (B2, B3)} <= set(rows)
+    # B0 and B1 never use the dwell model.
+    for method in (B0, B1):
+        pd.testing.assert_series_equal(
+            rows[f"pred_{method}"], median_rows[f"pred_{method}"]
+        )
+    # Re-chained from the actual departure, the hold absorbs part of the lag,
+    # so the result is not the scored forecast shifted by the anchor error.
+    shifted = rows[f"pred_{B3}"] + rows["actual_departure_delay_s"]
+    assert not np.allclose(rows[f"anchor_free_pred_{B3}"], shifted)
+    metrics = score_predictions(rows, config=config, candidate=None)
+    free = metrics["anchor_free"]["summary"].set_index("method")["MAE_s"]
+    expected = (rows[f"anchor_free_pred_{B3}"] - rows["truth_delay_seconds"]).abs()
+    holidays = rows["service_day"].isin([pd.Timestamp(d) for d in config.holidays])
+    assert free[B3] == pytest.approx(expected[~holidays].mean())
+    assert links.loc[~links["upstream_is_first_stop"], "dwell_model"].ge(0).all()
+
+
+def test_run_study_records_dwell_and_log_row_names_it():
+    run = run_study(
+        _config(),
+        _updates(),
+        model_name="calendar_median",
+        split="dev",
+        dwell="stop_hold",
+    )
+    assert run.info["dwell"] == "stop_hold"
+    assert "stop_hold dwell" in log_row(run, run_id="r", git_hash="abc")
+    default = run_study(
+        _config(), _updates(), model_name="calendar_median", split="dev"
+    )
+    assert default.info["dwell"] == "stop_median"
+    assert "dwell" not in log_row(default, run_id="r", git_hash="abc")

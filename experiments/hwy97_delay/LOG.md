@@ -28,6 +28,7 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
 | E015 | 2026-11-22 | [4f80b84](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/4f80b84) | H8 ([#25](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/25)) | dev: harmonic_residual_hour ([7594714fa45d41f1b95959a6347f1550](http://127.0.0.1:5000/#/experiments/1/runs/7594714fa45d41f1b95959a6347f1550)) | not interpreted (shuffled control failed) | n/a | n/a | superseded by E017 (owner chose option (c)) |
 | E016 | 2026-11-27 | [62583ad](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/62583ad) | [#36](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/36) | dev: harmonic_huber, post-midnight journeys recovered ([505097b99658454c9c35757184b6d3d6](http://127.0.0.1:5000/#/experiments/1/runs/505097b99658454c9c35757184b6d3d6)) | 132.9 (B0 162.8; anchor-free 115.5) | -30.0 [-36.7, -23.6] (-18.4%) | -1.3 vs B3_calendar_median | keep; +1,550 overnight visits, new reference baseline |
 | E017 | 2026-11-28 | [e1063a3](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/e1063a3) | H8 ([#25](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/25)) | dev: harmonic_residual_hour_centred ([400457c929b64472a6dbc272b635d599](http://127.0.0.1:5000/#/experiments/1/runs/400457c929b64472a6dbc272b635d599)) | 131.1 (B0 162.8; anchor-free 112.3) | -31.7 [-38.3, -25.4] (-19.5%) | -3.1 vs B3_calendar_median | keep; vs harmonic −1.7 [−2.9, −0.4] scored, −3.2 [−4.5, −1.7] anchor-free |
+| E018 | 2026-11-28 | [28cce0c](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/28cce0c) | H7 ([#15](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/15)) | dev: harmonic_residual_hour_centred + stop_hold dwell ([3dc3f1210cfd4c98a2a2e5a84e697027](http://127.0.0.1:5000/#/experiments/1/runs/3dc3f1210cfd4c98a2a2e5a84e697027)) | 121.4 (B0 162.8; anchor-free 104.2) | -41.5 [-46.7, -36.3] (-25.5%) | -3.0 vs B3_calendar_median | keep; vs E017 −9.8 [−11.9, −7.5] scored, −8.1 [−9.6, −6.5] anchor-free; B3 gains as much. Owner adopted `stop_hold` as the study's dwell rule (2026-11-28); new reference baseline |
 
 ## Entries
 
@@ -385,6 +386,60 @@ Links: issue numbers open the GitHub issue, whose **Experiment runs** section li
   - Unlike E015, the gain is not a level shift (traversal and delay bias unchanged). It is the hour shape that harmonic's smooth daily curve misses, mainly the sharp 16–17 h peak and the overnight trips. Per link the correction does nothing (traversal MAE +0.2 s). It only pays off because same-hour corrections add up along the route, as exploration plot 2 suggested.
 - Verdict: **keep.** On anchor-free MAE, which decides propagation hypotheses, the candidate beats harmonic by −3.2 s [−4.5, −1.7] in all 6 folds and B3 by −6.1 s [−10.0, −2.6]. The scored gain over harmonic is small but clear of 0; against B3 the scored CI still spans 0. New best candidate: `harmonic_residual_hour_centred` (131.1 s scored, 112.3 s anchor-free). It is route-agnostic: everything is learned from each segment's training residuals, with no route constants.
 - Next: (1) **H10**: give the base model a sharper daily shape so it captures the 16–17 h peak itself rather than through a correction. (2) Recheck the evening loss once H7 (timepoint holding, #15) removes the chain's early drift. (3) E015's segment-level term could be tested on its own if the owner approves a control fix (option (b) on #25).
+
+### E018: recovery-aware dwell, per-stop hold floor (H7, #15)
+
+- Hypothesis: H7. Buses that are early at a timepoint wait for the scheduled departure, so delay recovers towards the timetable there. A chain whose dwell responds to its own predicted arrival delay (hold to the schedule where a stop holds) beats the plain sum with a constant per-stop median dwell.
+- Harness change (owner request, 2026-11-27: "create a new module just like traversal_models.py called dwell_models.py"): dwell is now a pluggable model in `forecasting/forecasting/dwell_models.py` (`make_dwell_model`), chosen with `--dwell` for B2, B3, the candidate and the control (B0 and B1 never use it). The default `stop_median` is the old rule and reproduces E017's predictions exactly (max difference 0.0 s for every method, checked before this run). A model that sets `uses_arrival_delay` gets the chain's predicted arrival delay at each stop, so the harness chains stop by stop (`chain_with_dwell_model`). The anchor-free score then re-chains from the actual first-stop departure, since a shift is no longer exact. Prepared links gain `scheduled_dwell_seconds` and `upstream_arrival_delay_seconds` (NaN for a stale arrival report).
+- Exploration: [28590f2b49dd46fe86afad265a28d2ad](http://127.0.0.1:5000/#/experiments/1/runs/28590f2b49dd46fe86afad265a28d2ad) (5 figures, 1 corrected v2; E017's dev artifacts).
+
+  1. **Four stops hold, sharply.** Departure delay is floored at exactly 0 s at stops 3, 6, 10 and 12. At the other eight stops early buses leave early. Stop 6 (60 s scheduled dwell) also takes back up to about 1 min from late buses.
+
+     ![Departure vs arrival delay by stop](figures/E018/01_dep_vs_arr_delay_by_stop.png)
+
+  2. **The chain often predicts early arrivals there.** Early (< 0) at stops 3 / 6 / 10 / 12: actual 19 / 46 / 22 / 14%; E017 scored 13 / 52 / 37 / 24%; anchor-free 6 / 34 / 27 / 17%. Downstream the scored chain drifts early, so the floor would act on many forecasts.
+  3. **A per-stop hinge `departure = max(arrival + c, h)` fixes the holding stops.** Given the actual arrival (one step, fit dev1, scored dev2–dev6), departure-delay MAE: stop 6 52.0 → 26.5 s (bias −29 → −3), stop 10 29.3 → 21.2, stop 3 12.8 → 9.7, stop 12 14.9 → 13.9. Fit on one fold, it also learns false floors at stops 4, 5 and 8 (−120 to −60 s), costing 0.5–2 s, so the design keeps floors near the schedule only.
+
+     ![One-step departure-delay MAE, median rule vs hinge](figures/E018/04_one_step_departure_mae_median_vs_hinge.png)
+
+  4. **What is left is hour-structured in a few cells only.** Late buses at stop 6 recover 50–75 s more at 14–16 h, and stop 10 dwells 30 s less at 7–13 h. Elsewhere the median residual is 0. That is a separate refinement (proposed H11), left out so this run measures holding alone.
+
+- Design (fixed before scoring): `StopHoldDwell`, registered as `stop_hold`. Per upstream stop, an L1 grid fit of `departure_delay = max(arrival_delay + c, h)` on the fold's training links (fresh upstream arrival, dwell ≥ 0, not the first stop), with c ∈ [−120, 180] s (step 1) and h ∈ [−60, 60] s (step 5). The floor is kept only if it lowers in-sample MAE by ≥ 2% over the no-hold median, otherwise h = −inf and c = median(dwell − scheduled dwell), which is the old rule. Fewer than 50 links: pooled median, no hold. Predicted dwell = max(c, h − predicted arrival delay) + scheduled dwell, clipped at 0. Traversal model: E017's `harmonic_residual_hour_centred`, unchanged. Single run, no tuning. Training-side check before scoring: dev1 and dev6 training both learn h = 0 s at stops 3, 6, 10 and 12, and h = −inf everywhere else.
+- Prediction before running (reference E017: candidate 131.1 s scored, bias −72.4; 112.3 s anchor-free, bias −17.4; B3 134.2 / 118.4):
+  - Holds only ever move a forecast later, and the scored chain runs about 70 s early, so **scored delay MAE improves for every chained method**: candidate 123–129 s (−2 to −8 s), bias −45 to −60 s. The gain starts at stop 7 and grows downstream; stops 2–6 change by < 1 s.
+  - **Anchor-free** improves less: candidate 108–111 s (−1 to −4 s), bias −17 → between −8 and +5 s.
+  - B3 gains about as much (scored 126–132 s), so **candidate vs B3 stays about where E017 left it** (scored −2 to −4 s; anchor-free −5 to −7 s).
+  - Shuffled control passes (control and B2 share the dwell model). Traversal scores are unchanged (dwell does not touch traversal).
+
+- Git: [28cce0c](https://github.com/AbdulRahmanSilmy/transit-forecasting/commit/28cce0c) (clean)   MLflow run: [3dc3f1210cfd4c98a2a2e5a84e697027](http://127.0.0.1:5000/#/experiments/1/runs/3dc3f1210cfd4c98a2a2e5a84e697027); exploration [28590f2b49dd46fe86afad265a28d2ad](http://127.0.0.1:5000/#/experiments/1/runs/28590f2b49dd46fe86afad265a28d2ad)
+- Results (dev, the same 29,292 visits as E017; 39 service days; 0 unscorable for every method):
+  - **Delay MAE:** B0 162.8 s, B1 162.8, B2 188.8 (E017 253.7), B3 124.4 (134.2), **candidate 121.4** (131.1; bias −63.8, was −72.4), shuffled control 191.0.
+  - **vs B0:** −41.5 s [−46.7, −36.3], −25.5%, win rate 0.69 (E017: −31.7 [−38.3, −25.4]). **vs B3:** −3.0 s (E017: −3.1). Development criterion indicative only: met (CI below 0, ≥ 5%, beats B3).
+  - **vs E017, paired on the same rows** (day bootstrap on both runs' saved predictions): candidate scored **−9.8 s [−11.9, −7.5]**, anchor-free **−8.1 s [−9.6, −6.5]**; B3 scored −9.8 [−12.1, −7.5], anchor-free −8.8 [−10.3, −7.3].
+  - **By fold (candidate / B3):** dev1 139.3 / 147.4, dev2 127.5 / 132.3, dev3 113.8 / 115.4, dev4 110.9 / 111.7, dev5 135.2 / 137.6, dev6 104.4 / 105.2. vs E017 the candidate improves in every fold: scored −8.0 to −12.1 s, anchor-free −5.7 to −11.7 s. It beats B3 in all 6 folds.
+  - **By stop (candidate vs E017):** stops 2–6 within ±0.1 s; −12.4 s at stop 7, −15.4 at stop 10, −20.0 at stop 11, −17.2 at stop 14 (anchor-free −9.8, −13.8, −15.9, −14.6).
+  - **By period (candidate):** am_peak 112.4 (E017 134.7), pm_peak 152.0 (157.4), midday 137.6 (147.1), early 76.7 (77.6), evening 97.6 (106.0; B3 94.5).
+  - **Anchor-free:** candidate 104.2 s (bias −16.9), B3 109.5 (−3.0), B1 133.6. vs B3 **−5.3 s [−9.0, −2.0]** (E017: −6.1).
+  - **Dwell:** model dwell MAE 16.0 s (bias −2.6) along the candidate's chain, vs E017's median rule 15.4 s (bias −3.7). Per link, dwell is slightly worse: it now depends on the chain's predicted arrival, not the actual one. The gain is in the delay that carries downstream. Traversal scores are identical to E017 (candidate 33.2 s).
+
+  - **Ticket #15's success check (stops 10–14 below B0, earlier stops unharmed): met.** Candidate / B0 at stops 10–14: 138.7 / 175.1, 155.3 / 242.4, 165.0 / 234.2, 168.4 / 203.0, **175.6 / 186.1** (E017 lost to B0 at stop 14: 192.8). Stops 2–6 unchanged.
+  - **Dwell bias by stop (E017 → E018):** stop 6 −27.3 → −13.9 s, stop 10 −20.5 → −17.1, stop 12 +7.4 → +3.9, stop 3 +4.0 unchanged; others identical. Per-link dwell MAE gets worse at stop 6 (50.3 → 56.8 s): the dwell now offsets the chain's own arrival error, which helps the delay carried downstream but not the dwell scored alone.
+  - **Learned holds:** h = 0 s at stops 3, 6, 10 and 12 in every fold, h = −inf elsewhere. These are exactly the GTFS timepoints between the anchor and the terminus (#15), found without the timepoint flag.
+
+  ![Δ delay MAE vs E017 by stop](figures/E018/06_result_delta_vs_e017_by_stop.png)
+
+  - **Predicted vs actual (owner request, 2026-11-28).** Transit BC's earliest estimate is exactly 0 s for every visit, so its panel is a vertical line (median actual 1.5 min). E018's median actual per 1-min bin of predicted follows y = x from −1 to 10 min (predicted 4.5 → actual 4.5 min, 8.5 → 7.4). E017 over-forecasts from 4 to 9 min (5.5 → 3.9, 8.5 → 6.6). Both are still too early below about −2 min predicted (actual median about −0.5 min), and neither forecasts the large delays (incidents, out of scope).
+
+  ![Predicted vs actual delay: Transit BC, E017, E018](figures/E018/09_predicted_vs_actual_scatter_b0_e017_e018.png)
+
+- Sanity checks: leakage assertions passed; identical rows across methods (0 unscorable); **shuffled control passed** (191.0 s vs B2 188.8, threshold 186.9). Before the run, `--dwell stop_median` reproduced E017's predictions exactly.
+- Interpretation: **direction right, size underestimated.**
+  - Held: every chained method improves, the gain starts at stop 7 and grows downstream, stops 2–6 don't move, the control passes, traversal is unchanged, and candidate vs B3 stays where it was (−3.0 s scored, −5.3 s anchor-free).
+  - Not predicted: the size. Scored −9.8 s against −2 to −8, and anchor-free −8.1 s against −1 to −4. Anchor-free bias barely changes (−17.4 → −16.9 s; by stop within 2 s), so **the gain is spread reduction, not a level shift**. The floor lifts forecasts that run early at stop 6, and stop 6's learned recovery (c ≈ −1 s, where the median rule implied +13 s) pulls late forecasts back. Both move the chain towards the timetable, which is the H7 mechanism.
+  - Almost all of it comes from stop 6. Stop 3's floor rarely acts (stop 4 −0.1 s). Stop 10 adds about 4.6 s at stop 11. Stop 12 adds nothing.
+  - The one-step check in exploration plot 3 showed stop 10 is still biased −13 s (long dwells by some late buses), and the hour structure (plot 4) is unused.
+- Verdict: **keep.** Against E017, on the anchor-free score that decides propagation hypotheses: −8.1 s [−9.6, −6.5], negative in every fold (−5.7 to −11.7 s). New best: `harmonic_residual_hour_centred` with `--dwell stop_hold` (121.4 s scored, 104.2 s anchor-free). Holds are learned per stop from training links, with no route constants. **Owner decision (2026-11-28): adopted.** `stop_hold` is now the study's dwell rule and the CLI default (RESEARCH.md Definitions and Decisions), and E018 is the new reference baseline.
+- Next: (1) **H11** ([#46](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/46)): recovery that depends on hour (stop 6 in the 14–16 h peak, stop 10 midday). (2) Recheck E017's evening loss and H10 on top of the hold chain. (3) The 5% criterion is easily met on dev now; the locked test (#20) stays owner-only.
 
 <!-- Template for new entries:
 
