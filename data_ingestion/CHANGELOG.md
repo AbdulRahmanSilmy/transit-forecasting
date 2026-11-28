@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and this project uses Semantic Versioning.
 
+## [0.4.1] - 2026-11-27
+
+### Fixed
+- `trip_start_timestamp` is no longer null for trips whose GTFS `start_time` is `24:00:00` or later (post-midnight service). The descriptor is now parsed as `start_date` at midnight plus `start_time` as a duration, so `20261104 24:14:00` is stored as `2026-11-05 00:14:00`. Rows ingested before this fix still have nulls for these trips ([#36](https://github.com/AbdulRahmanSilmy/transit-forecasting/issues/36)).
+
 ## [0.4.0] - 2026-11-19
 
 ### Added
